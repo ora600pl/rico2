@@ -1,3 +1,22 @@
+# ------------------------------------------------------------------------------
+#
+#  Copyright 2018 Kamil Stawiarski ( kstawiarski@ora-600.pl | http://ora-600.pl )
+#  Database Whisperers sp. z o. o. sp. k.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
+# ------------------------------------------------------------------------------
+
 from struct import Struct
 import os
 import sys
@@ -697,7 +716,6 @@ if __name__ == '__main__':
                     where = command.split("=")[0]
                     what = command.split("=")[1]
                     rico.select(where, what)
-
 
 
         except BaseException as e:
