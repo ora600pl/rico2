@@ -547,9 +547,12 @@ class Rico(object):
 
     def find(self, file_id, block_id, data_object_id, search_string, search_hex):
         search_in_one_dba = False
+        search_only_blocks_for_objd = False
 
         if search_hex != "42bee125":
             search_string = unhexlify(search_hex)
+        elif search_string == ".":
+            search_only_blocks_for_objd = True
 
         if block_id == -1 and file_id == -1:
             file_id = self.current_block_desc["FILE_ID"]
@@ -589,11 +592,13 @@ class Rico(object):
                 else:
                     objd = 0
 
-                if objd == data_object_id or data_object_id == -1:
+                if not search_only_blocks_for_objd and (objd == data_object_id or data_object_id == -1):
                     pos = block.find(search_string)
                     while pos != -1:
                         print("Found in block: " + str(i) + " at offset: " + str(pos))
                         pos = block.find(search_string, pos + 1)
+                elif search_only_blocks_for_objd and objd == data_object_id:
+                    print("Found in block: " + str(i) + " block type: " + self.block_type.get(block_type, "OTHER"))
 
             dbf.close()
             print("\nSearch finished.\n")
