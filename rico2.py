@@ -378,12 +378,11 @@ class Rico(object):
             col_data = OracleType(r["COL_DATA"][col][2], data_type)
             if col_data.value_string == search_string:
                 found_row = rowp
+                print("Found at *kdbr[" + str(found_row) + "]")
 
             rowp += 1
 
-        if found_row > -1:
-            print("Found at *kdbr[" + str(found_row) + "]")
-        else:
+        if found_row == -1:
             print("Nothing")
 
 
