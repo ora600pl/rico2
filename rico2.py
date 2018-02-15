@@ -85,6 +85,7 @@ class OracleType(object):
 class Rico(object):
     def __init__(self):
         self.uint = Struct("I")
+        self.uint2 = Struct("II")
         self.ubyte = Struct("B")
         self.ubyte2 = Struct("BB")
         self.ushort = Struct("H")
@@ -105,6 +106,7 @@ class Rico(object):
         self.ktbbhtypOffset = 20  # for block type 6, byte 20 specifies 1 for table data and 2 for index data
         self.flg_kcbh_pos = 15
         self.offset_mod = 0
+        self.manual_offset = 0
 
         self.min_rowdata = -1
         self.max_rowdata = -1
@@ -252,14 +254,19 @@ class Rico(object):
         self.max_rowdata = -1
         self.current_rowp = 0
         self.current_offset = 0
-        self.offset_mod = 0
+        self.offset_mod = self.manual_offset
 
         if block_type == 6:
             self.current_block_desc["ITLS"] = \
                 self.ubyte.unpack(self.block_data[self.ktbbhictOffset:self.ktbbhictOffset + 1])[0]
 
-            flg_kcbh = self.ubyte.unpack(self.block_data[self.flg_kcbh_pos:self.flg_kcbh_pos+1])[0]
-            if flg_kcbh == 4:
+            end_of_ktbbh = 20 + 24 + self.current_block_desc["ITLS"] * 24
+            mod_flags = self.uint2.unpack(self.block_data[end_of_ktbbh:end_of_ktbbh+8])
+            if mod_flags[0] == 0 and mod_flags[1] == 0:
+                self.offset_mod = 0
+            elif mod_flags[0] == 0 and mod_flags[1] > 0:
+                self.offset_mod = -4
+            elif mod_flags[0] > 0 and mod_flags[1] > 0:
                 self.offset_mod = -8
 
         if block_type == 6 and block_subtype == 1:
@@ -384,7 +391,6 @@ class Rico(object):
 
         if found_row == -1:
             print("Nothing")
-
 
 
     def p_ktbbh(self):
@@ -654,6 +660,8 @@ if __name__ == '__main__':
                 rico.dump()
             elif command.startswith("set offset"):
                 rico.set_offset(int(command.split()[2]))
+            elif command.startswith("set manualoffset"):
+                rico.manual_offset = int(command.split()[2])
             elif command.startswith("find"):
                 if command == "find":
                     print("Usage: find [-f file_id] [-o data_object_id] [-b block_no] [-s search_string | "
