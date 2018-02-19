@@ -6,7 +6,7 @@ Not everything is documented but in most cases the code is trivial to interpret 
 So if you don't know how to use this tool - then maybe you shouldn't ;)
 
 Usage: python2.7 rico2.py listfile.txt
-The listfile.txt should contain the list of the DBF files you want to read
+The listfile.txt should contain the list of the DBF files you want to read in the same format as BBED listfile
 
 ## !!! CAUTION !!!!
 
