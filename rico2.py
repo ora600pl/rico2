@@ -114,7 +114,7 @@ class Rico(object):
 
         self.block_data = None
         self.block_data_backup = None
-        self.file_names = []
+        self.file_names = {}
 
         # type_kcbh, frmt_kcbh, spare1_kcbh, spare2_kcbh, rdba_kcbh, bas_kcbh, wrp_kcbh, seq_kcbh, flg_kcbh,
         # chkval_kcbh, spare3_kcbh
@@ -125,6 +125,9 @@ class Rico(object):
 
         # 24 bytes for ITL slot
         self.struct_ktbbhitl = Struct("HHIIHBHHI")
+
+        # 14 bytes for kdbh struct
+        self.struct_kdbh = Struct("Bbhhhhhh")
 
         self.edit_mode = False
         self.current_offset = 0
@@ -156,11 +159,11 @@ class Rico(object):
 
     def add_file(self, dbf):
         dbfs = open(dbf, "r").readlines()
-        file_id = 1
         for f in dbfs:
-            self.file_names.append(f[:-1])
-            print(str(file_id) + "\t" + f[:-1])
-            file_id += 1
+            file_id = int(f.split()[0])
+            file_name = f.split()[1]
+            self.file_names[file_id] = file_name
+            print(str(file_id) + "\t" + file_name)
 
     def get_row_details(self):
         num_of_itls = self.current_block_desc["ITLS"]
@@ -236,14 +239,14 @@ class Rico(object):
         self.current_block_desc["ACTUAL_ROWS"] = actual_rows
 
     def get_block(self, file_id, block_id):
-        dbf = open(self.file_names[file_id-1], "rb")
+        dbf = open(self.file_names[file_id], "rb")
         dbf.seek(block_id * self.block_size)
         self.block_data = dbf.read(self.block_size)
         self.block_data_backup = self.block_data
         dbf.close()
         dba = file_id * self.max_block + block_id
 
-        self.current_block_desc = {"DBA": dba, "FILE_ID": file_id, "FILE_NAME": self.file_names[file_id-1]}
+        self.current_block_desc = {"DBA": dba, "FILE_ID": file_id, "FILE_NAME": self.file_names[file_id]}
         block_type = self.ubyte.unpack(self.block_data[0:1])[0]
         block_subtype = self.ubyte.unpack(self.block_data[20:21])[0]
 
@@ -318,12 +321,53 @@ class Rico(object):
         print(" struct ktbbh, {0:>3s} bytes \t\t\t@20\n".format(str(24 + self.current_block_desc["ITLS"]*24)))
 
         if block_type == 6 and block_subtype == 1:
+            kdbh_offset = 20 + 24 + self.current_block_desc["ITLS"]*24 + self.offset_mod + 8
+            print(" struct kdbh, 14 bytes \t\t\t\t@" + str(kdbh_offset) + "\n")
+            kdbt_offset = kdbh_offset + 14
+            kdbt_size = self.current_block_desc["NTAB"] * 4
+            print(" struct kdbt[" + str(self.current_block_desc["NTAB"]) + "], " + str(kdbt_size) + " bytes\t\t\t" +
+                  "@" + str(kdbt_offset) + "\n")
             print(" sb2 kdbr[" + str(self.current_block_desc["DECLARED_ROWS"]) + "]\t\t\t\t\t@"
                   + str(self.current_block_desc["FIRST_KDBR"]))
+            free_space_start = self.current_block_desc["FIRST_KDBR"] + self.current_block_desc["DECLARED_ROWS"] * 2
+            free_space_size = self.min_rowdata - free_space_start
+            print("\n ub1 freespace[" + str(free_space_size) + "]\t\t\t\t@" + str(free_space_start))
             rowdata_size = self.max_rowdata - self.min_rowdata
             print("\n ub1 rowdata[" + str(rowdata_size) + "]\t\t\t\t@" + str(self.min_rowdata))
 
-        print("\n\n")
+        print("\n ub4 tailchk\t\t\t\t\t@" + str(self.block_size-4))
+
+        print("\n")
+
+    def p_tailchk(self):
+        tailchk_off = self.block_size-4
+        tailchk_val = self.uint.unpack(self.block_data[tailchk_off:tailchk_off+4])[0]
+        print("ub4 tailchk\t\t\t\t@" + str(tailchk_off) + "\t" + str(hex(tailchk_val)) + "\n")
+
+    def p_kdbt(self):
+        kdbt_offset = 20 + 24 + self.current_block_desc["ITLS"] * 24 + self.offset_mod + 8 + 14
+        for i in range(self.current_block_desc["NTAB"]):
+            print("struct kdbt[" + str(i) + "], 4 bytes \t\t\t@" + str(kdbt_offset + i*4))
+            kdbtoffs = self.ushort.unpack(self.block_data[kdbt_offset + i * 4 : kdbt_offset + i * 4 + 2])[0]
+            kdbtnrow = self.ushort.unpack(self.block_data[kdbt_offset + i * 4 + 2 : kdbt_offset + i * 4 + 4])[0]
+            print("\tsb2 kdbtoffs\t\t\t\t@" + str(kdbt_offset + i * 4) + "\t" + str(kdbtoffs))
+            print("\tsb2 kdbtnrow\t\t\t\t@" + str(kdbt_offset + i * 4 + 2) + "\t" + str(kdbtnrow))
+
+        print(" ")
+
+    def p_kdbh(self):
+        kdbh_offset = 20 + 24 + self.current_block_desc["ITLS"] * 24 + self.offset_mod + 8
+        print("struct kdbh, 14 bytes \t\t\t\t@" + str(kdbh_offset))
+        kdbh = self.struct_kdbh.unpack(self.block_data[kdbh_offset:kdbh_offset+14])
+        print("\tub1 kdbhflag\t\t\t\t@" + str(kdbh_offset) + "\t" + str(hex(kdbh[0])))
+        print("\tsb1 kdbhntab\t\t\t\t@" + str(kdbh_offset + 1) + "\t" + str(kdbh[1]))
+        print("\tsb2 kdbhnrow\t\t\t\t@" + str(kdbh_offset + 2) + "\t" + str(kdbh[2]))
+        print("\tsb2 kdbhfrre\t\t\t\t@" + str(kdbh_offset + 4) + "\t" + str(kdbh[3]))
+        print("\tsb2 kdbhfseo\t\t\t\t@" + str(kdbh_offset + 6) + "\t" + str(kdbh[4]))
+        print("\tsb2 kdbhfsbo\t\t\t\t@" + str(kdbh_offset + 8) + "\t" + str(kdbh[5]))
+        print("\tsb2 kdbhavsp\t\t\t\t@" + str(kdbh_offset + 10) + "\t" + str(kdbh[6]))
+        print("\tsb2 kdbhtosp\t\t\t\t@" + str(kdbh_offset + 12) + "\t" + str(kdbh[7]))
+        print("\n")
 
     def p_kdbr(self, rowp=-1):
         if rowp == -1:
@@ -368,7 +412,6 @@ class Rico(object):
                                                                    value_string))
 
         print("\n")
-
 
     def examine(self, pattern):
         if pattern[0:2] == "/r":
@@ -610,7 +653,6 @@ class Rico(object):
             print("\nSearch finished.\n")
 
 
-
 if __name__ == '__main__':
 
     rico = Rico()
@@ -654,6 +696,12 @@ if __name__ == '__main__':
                     rico.checksum(False)
             elif command.startswith("p ktbbh"):
                 rico.p_ktbbh()
+            elif command.startswith("p kdbt"):
+                rico.p_kdbt()
+            elif command.startswith("p kdbh"):
+                rico.p_kdbh()
+            elif command.startswith("p tailchk"):
+                rico.p_tailchk()
             elif command.startswith("x") and command.split() >= 2:
                 rico.examine(command.split()[1])
             elif command.startswith("d"):
