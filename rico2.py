@@ -614,7 +614,7 @@ class Rico(object):
             search_in_one_dba = True
 
         if search_in_one_dba:
-            dbf = open(self.file_names[file_id - 1], "rb")
+            dbf = open(self.file_names[file_id], "rb")
             dbf.seek(block_id*self.block_size)
             block = dbf.read(self.block_size)
             dbf.close()
@@ -626,7 +626,7 @@ class Rico(object):
             print("\nSearch finished.\n")
 
         else:
-            dbf = open(self.file_names[file_id - 1], "rb")
+            dbf = open(self.file_names[file_id], "rb")
             dbf.seek(0, os.SEEK_END)
             fsize = dbf.tell()
             blocks = fsize / self.block_size
