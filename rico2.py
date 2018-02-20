@@ -547,7 +547,7 @@ class Rico(object):
         print("Current block data successfully saved to disk. To revert changes, type: dupa")
 
     def dupa(self):
-        dbf = open(self.file_names[file_id - 1], "r+b")
+        dbf = open(self.file_names[file_id], "r+b")
         block_id = self.current_block_desc["DBA"] & (self.max_block - 1)
         dbf.seek(block_id * self.block_size)
         dbf.write(self.block_data_backup)
