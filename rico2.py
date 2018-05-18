@@ -594,62 +594,105 @@ class Rico(object):
         else:
             print("Nothing changed. You are annoying.")
 
-    def find(self, file_id, block_id, data_object_id, search_string, search_hex):
+    def find(self, file_id, block_id, data_object_id, search_string, search_hex, search_xo):
         search_in_one_dba = False
         search_only_blocks_for_objd = False
 
-        if search_hex != "42bee125":
-            search_string = unhexlify(search_hex)
-        elif search_string == ".":
-            search_only_blocks_for_objd = True
+        if search_xo == "42bee125":
+            if search_hex != "42bee125":
+                search_string = unhexlify(search_hex)
+            elif search_string == ".":
+                search_only_blocks_for_objd = True
 
-        if block_id == -1 and file_id == -1:
-            file_id = self.current_block_desc["FILE_ID"]
-            block_id = self.current_block_desc["DBA"] & (self.max_block - 1)
-            search_in_one_dba = True
-        elif block_id > -1 and file_id == -1:
-            file_id = self.current_block_desc["FILE_ID"]
-            search_in_one_dba = True
-        elif block_id > -1 and file_id > -1:
-            search_in_one_dba = True
+            if block_id == -1 and file_id == -1:
+                file_id = self.current_block_desc["FILE_ID"]
+                block_id = self.current_block_desc["DBA"] & (self.max_block - 1)
+                search_in_one_dba = True
+            elif block_id > -1 and file_id == -1:
+                file_id = self.current_block_desc["FILE_ID"]
+                search_in_one_dba = True
+            elif block_id > -1 and file_id > -1:
+                search_in_one_dba = True
 
-        if search_in_one_dba:
-            dbf = open(self.file_names[file_id], "rb")
-            dbf.seek(block_id*self.block_size)
-            block = dbf.read(self.block_size)
-            dbf.close()
-            pos = block.find(search_string)
-            while pos != -1:
-                print("Found at offset: " + str(pos))
-                pos = block.find(search_string, pos + 1)
+            if search_in_one_dba:
+                dbf = open(self.file_names[file_id], "rb")
+                dbf.seek(block_id*self.block_size)
+                block = dbf.read(self.block_size)
+                dbf.close()
+                pos = block.find(search_string)
+                while pos != -1:
+                    print("Found at offset: " + str(pos))
+                    pos = block.find(search_string, pos + 1)
 
-            print("\nSearch finished.\n")
+                print("\nSearch finished.\n")
+
+            else:
+                dbf = open(self.file_names[file_id], "rb")
+                dbf.seek(0, os.SEEK_END)
+                fsize = dbf.tell()
+                blocks = fsize / self.block_size
+
+                for i in range(1, blocks):
+                    dbf.seek(i * self.block_size)
+                    block = dbf.read(self.block_size)
+                    block_type = self.ubyte.unpack(block[0])[0]
+                    objd_offset = self.offset_objd.get(block_type, -1)
+                    if objd_offset != -1:
+                        objd = self.uint.unpack(block[objd_offset:objd_offset+4])[0]
+                    else:
+                        objd = 0
+
+                    if not search_only_blocks_for_objd and (objd == data_object_id or data_object_id == -1):
+                        pos = block.find(search_string)
+                        while pos != -1:
+                            print("Found in block: " + str(i) + " at offset: " + str(pos))
+                            pos = block.find(search_string, pos + 1)
+                    elif search_only_blocks_for_objd and objd == data_object_id:
+                        print("Found in block: " + str(i) + " block type: " + self.block_type.get(block_type, "OTHER"))
+
+                dbf.close()
 
         else:
-            dbf = open(self.file_names[file_id], "rb")
-            dbf.seek(0, os.SEEK_END)
-            fsize = dbf.tell()
-            blocks = fsize / self.block_size
+            data_object_id = int(search_xo.split(":")[1])
+            search_xid = search_xo.split(":")[0].lower()
+            if file_id == -1:
+                file_names = self.file_names
+            else:
+                file_names = {}
+                file_names[file_id] = self.file_names[file_id]
 
-            for i in range(1, blocks):
-                dbf.seek(i * self.block_size)
-                block = dbf.read(self.block_size)
-                block_type = self.ubyte.unpack(block[0])[0]
-                objd_offset = self.offset_objd.get(block_type, -1)
-                if objd_offset != -1:
-                    objd = self.uint.unpack(block[objd_offset:objd_offset+4])[0]
-                else:
-                    objd = 0
+            for file_id in file_names:
+                dbf = open(file_names[file_id], "rb")
+                dbf.seek(0, os.SEEK_END)
+                fsize = dbf.tell()
+                blocks = fsize / self.block_size
+                # print("Searching in file: " + self.file_names[file_id] + " blocks: " + str(blocks))
+                for i in range(1, blocks):
+                    # print("\tsearching block: " + str(i))
+                    dbf.seek(i * self.block_size)
+                    block = dbf.read(self.block_size)
+                    block_type = self.ubyte.unpack(block[0])[0]
+                    objd_offset = self.offset_objd.get(block_type, -1)
+                    if objd_offset != -1:
+                        objd = self.uint.unpack(block[objd_offset:objd_offset+4])[0]
+                    else:
+                        objd = 0
 
-                if not search_only_blocks_for_objd and (objd == data_object_id or data_object_id == -1):
-                    pos = block.find(search_string)
-                    while pos != -1:
-                        print("Found in block: " + str(i) + " at offset: " + str(pos))
-                        pos = block.find(search_string, pos + 1)
-                elif search_only_blocks_for_objd and objd == data_object_id:
-                    print("Found in block: " + str(i) + " block type: " + self.block_type.get(block_type, "OTHER"))
+                    if objd == data_object_id and block_type == 6:
+                        itls = self.ubyte.unpack(block[self.ktbbhictOffset:self.ktbbhictOffset + 1])[0]
+                        itl_pos = 44
+                        for j in range(itls):
+                            itl_data = self.struct_ktbbhitl.unpack(block[itl_pos:itl_pos + 24])
+                            xid = hexlify(self.ushort.pack(itl_data[0])) + hexlify(self.ushort.pack(itl_data[1])) \
+                                  + hexlify(self.uint.pack(itl_data[2]))
+                            if xid == search_xid:
+                                print("Found in block: " + str(file_id) + "," + str(i)
+                                      + " block type: " + self.block_type.get(block_type, "OTHER"))
+                            itl_pos += 24
+                dbf.close()
 
-            dbf.close()
+
+
             print("\nSearch finished.\n")
 
 
@@ -712,14 +755,15 @@ if __name__ == '__main__':
                 rico.manual_offset = int(command.split()[2])
             elif command.startswith("find"):
                 if command == "find":
-                    print("Usage: find [-f file_id] [-o data_object_id] [-b block_no] [-s search_string | "
-                          "-h search hex]")
+                    print("Usage: find [-f file_id -o data_object_id] [-f file_id {-b block_no} -s search_string] | "
+                          "-f file_id {-b block_no} -h search hex] [{-f file_id} -xo XID:DATA_OBJECT_ID]")
                 else:
                     file_id = -1
                     block_id = -1
                     data_object_id = -1
                     search_string = "."
                     search_hex = "42bee125"
+                    search_xo = "42bee125"
                     i = 0
                     for w in command.split():
                         if w == "-f":
@@ -732,12 +776,14 @@ if __name__ == '__main__':
                             search_string = command.split()[i + 1]
                         elif w == "-h":
                             search_hex = command.split()[i + 1]
+                        elif w == "-xo":
+                            search_xo = command.split()[i + 1]
                         i += 1
 
                     if search_hex != "42bee125" and search_string != ".":
                         raise Exception("You have to decide - you are looking for HEX or STRING value?")
 
-                    rico.find(file_id, block_id, data_object_id, search_string, search_hex)
+                    rico.find(file_id, block_id, data_object_id, search_string, search_hex, search_xo)
             elif command.startswith("modify"):
                 if command == "modify":
                     print("Usage: First - set offset to a place that you want to modify. \n"
