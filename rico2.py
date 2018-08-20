@@ -136,6 +136,9 @@ class Rico(object):
         self.kdbr = []
         self.kdbr_data = []
 
+        self.row_header = {"cluster_key": 128, "head_piece": 32, "first_data": 8, "first_column_from_prev_piece": 2,
+                           "last_column_in_next_piece": 1, "clustered_table_member": 64, "deleted": 16, "last_data": 4}
+
     @staticmethod
     def help():
         print("RICO v2 by Kamil Stawiarski (@ora600pl | www.ora-600.pl)")
@@ -154,7 +157,7 @@ class Rico(object):
     def set_blocksize(self, bs):
         self.block_size = bs
 
-    def set_offset(self,offset):
+    def set_offset(self, offset):
         self.current_offset = offset
 
     def add_file(self, dbf):
@@ -192,11 +195,19 @@ class Rico(object):
                     self.kdbr_data[row]["FLAG"] = row_header[0]
                     self.kdbr_data[row]["LOCK"] = row_header[1]
 
-                    if row_header[0] == 44 or row_header[0] == 108:
+                    hfl = self.row_header["head_piece"] + self.row_header["first_data"] + self.row_header["last_data"]
+                    hfld = self.row_header["head_piece"] + self.row_header["first_data"] + self.row_header["last_data"] + self.row_header["deleted"]
+                    hflcm = self.row_header["head_piece"] + self.row_header["first_data"] + self.row_header["last_data"] + self.row_header["clustered_table_member"]
+                    hfcn = self.row_header["head_piece"] + self.row_header["first_data"] + self.row_header["last_column_in_next_piece"]
+                    hfln = self.row_header["head_piece"] + self.row_header["last_data"] + self.row_header["first_column_from_prev_piece"]
+                    h = self.row_header["head_piece"]
+                    fl = self.row_header["first_data"] + self.row_header["last_data"]
+
+                    if row_header[0] == hfl or row_header[0] == hflcm or row_header[0] == h:
                         actual_rows += 1
 
                     row_pos = row_pointer + 2
-                    if row_header[0] == 44 or row_header[0] == 60:
+                    if row_header[0] == hfl or row_header[0] == hfld or row_header[0] == fl:
                         ncols = self.ubyte.unpack(self.block_data[row_pos:row_pos+1])[0]
                         row_pos += 1
 
@@ -205,6 +216,20 @@ class Rico(object):
                             row_pos += 2
 
                         self.kdbr_data[row]["NCOLS"] = ncols
+                        if row_header[0] == fl:
+                            print(self.block_data[row_pos:row_pos + 4])
+                            hrid_b = hexlify(self.block_data[row_pos:row_pos + 4])
+                            print(hrid_b)
+                            block_no = int(hrid_b, 16) % self.max_block
+                            row_pos += 4
+                            hrid_r = hexlify(self.block_data[row_pos:row_pos + 2])
+                            hrid = "0x" + hrid_b + "." + hrid_r
+                            print(hrid)
+                            row_no = int(hrid_r, 16)
+                            file_no = int(hrid_b, 16) // self.max_block
+                            self.kdbr_data[row]["HRID"] = hrid + " [file: " + str(file_no) + " block: " \
+                                                          + str(block_no) + " kdbr: " + str(row_no) + " ]"
+                            row_pos += 2
 
                         self.kdbr_data[row]["COL_DATA"] = []
                         for i in range(ncols):
@@ -228,6 +253,26 @@ class Rico(object):
 
                         if row_pos > self.max_rowdata:
                             self.max_rowdata = row_pos
+
+                    elif row_header[0] == h:
+                        ncols = self.ubyte.unpack(self.block_data[row_pos:row_pos + 1])[0]
+                        row_pos += 1
+
+                        if ncols == 254:
+                            ncols = self.ushort.unpack(self.block_data[row_pos:row_pos + 2])[0]
+                            row_pos += 2
+
+                        self.kdbr_data[row]["NCOLS"] = ncols
+
+                        nrid_b = hexlify(self.block_data[row_pos:row_pos + 4])
+                        block_no = int(nrid_b, 16) % self.max_block
+                        row_pos += 4
+                        nrid_r = hexlify(self.block_data[row_pos:row_pos + 2])
+                        nrid = "0x" + nrid_b + "." + nrid_r
+                        row_no = int(nrid_r, 16)
+                        file_no = int(nrid_b, 16) // self.max_block
+                        self.kdbr_data[row]["NRID"] = nrid + " [file: " + str(file_no) + " block: " \
+                                                      + str(block_no) + " kdbr: " + str(row_no) + " ]"
 
                     row_pointer_offset += 2
 
@@ -386,11 +431,18 @@ class Rico(object):
         self.current_rowp = rowp
         self.current_offset = self.kdbr_data[rowp]["OFFSET"]
         print("rowdata[" + str(self.kdbr_data[rowp]["OFFSET"] - self.min_rowdata) + "]\t\t\t\t@"
-              + str(self.kdbr_data[rowp]["OFFSET"]) +  "\t" + str(hex(self.kdbr_data[rowp]["FLAG"])))
+              + str(self.kdbr_data[rowp]["OFFSET"]) + "\t" + str(hex(self.kdbr_data[rowp]["FLAG"])))
         print("-------------")
         print("flag@" + str(self.kdbr_data[rowp]["OFFSET"]) + ":\t" + str(hex(self.kdbr_data[rowp]["FLAG"])))
         print("lock@" + str(self.kdbr_data[rowp]["OFFSET"] + 1) + ":\t" + str(hex(self.kdbr_data[rowp]["LOCK"])))
         print("cols@" + str(self.kdbr_data[rowp]["OFFSET"] + 2) + ":\t" + str(self.kdbr_data[rowp]["NCOLS"]))
+
+        if self.kdbr_data[rowp].get("HRID") is not None:
+            print("hrid@" + str(self.kdbr_data[rowp]["OFFSET"] + 3) + ":\t" + str(self.kdbr_data[rowp]["HRID"]))
+
+        if self.kdbr_data[rowp].get("NRID") is not None:
+            print("nrid@" + str(self.kdbr_data[rowp]["OFFSET"] + 3) + ":\t" + str(self.kdbr_data[rowp]["NRID"]))
+
         print("\n")
 
         for i in range(self.kdbr_data[rowp]["NCOLS"]):
