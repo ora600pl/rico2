@@ -202,12 +202,13 @@ class Rico(object):
                     hfln = self.row_header["head_piece"] + self.row_header["last_data"] + self.row_header["first_column_from_prev_piece"]
                     h = self.row_header["head_piece"]
                     fl = self.row_header["first_data"] + self.row_header["last_data"]
+                    f = self.row_header["first_data"]
 
                     if row_header[0] == hfl or row_header[0] == hflcm or row_header[0] == h:
                         actual_rows += 1
 
                     row_pos = row_pointer + 2
-                    if row_header[0] == hfl or row_header[0] == hfld or row_header[0] == fl:
+                    if row_header[0] == hfl or row_header[0] == hfld or row_header[0] == fl or row_header[0] == f:
                         ncols = self.ubyte.unpack(self.block_data[row_pos:row_pos+1])[0]
                         row_pos += 1
 
@@ -230,6 +231,31 @@ class Rico(object):
                             self.kdbr_data[row]["HRID"] = hrid + " [file: " + str(file_no) + " block: " \
                                                           + str(block_no) + " kdbr: " + str(row_no) + " ]"
                             row_pos += 2
+                        elif row_header[0] == f:
+                            print(self.block_data[row_pos:row_pos + 4])
+                            hrid_b = hexlify(self.block_data[row_pos:row_pos + 4])
+                            print(hrid_b)
+                            block_no = int(hrid_b, 16) % self.max_block
+                            row_pos += 4
+                            hrid_r = hexlify(self.block_data[row_pos:row_pos + 2])
+                            hrid = "0x" + hrid_b + "." + hrid_r
+                            print(hrid)
+                            row_no = int(hrid_r, 16)
+                            file_no = int(hrid_b, 16) // self.max_block
+                            self.kdbr_data[row]["HRID"] = hrid + " [file: " + str(file_no) + " block: " \
+                                                          + str(block_no) + " kdbr: " + str(row_no) + " ]"
+                            row_pos += 2
+                            nrid_b = hexlify(self.block_data[row_pos:row_pos + 4])
+                            block_no = int(nrid_b, 16) % self.max_block
+                            row_pos += 4
+                            nrid_r = hexlify(self.block_data[row_pos:row_pos + 2])
+                            nrid = "0x" + nrid_b + "." + nrid_r
+                            row_no = int(nrid_r, 16)
+                            file_no = int(nrid_b, 16) // self.max_block
+                            self.kdbr_data[row]["NRID"] = nrid + " [file: " + str(file_no) + " block: " \
+                                                          + str(block_no) + " kdbr: " + str(row_no) + " ]"
+                            row_pos += 2
+
 
                         self.kdbr_data[row]["COL_DATA"] = []
                         for i in range(ncols):
