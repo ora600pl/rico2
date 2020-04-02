@@ -763,7 +763,7 @@ class Rico(object):
                             itl_data = self.struct_ktbbhitl.unpack(block[itl_pos:itl_pos + 24])
                             xid = hexlify(self.ushort.pack(itl_data[0])) + hexlify(self.ushort.pack(itl_data[1])) \
                                   + hexlify(self.uint.pack(itl_data[2]))
-                            if xid == search_xid or search_xid == "ALL":
+                            if xid == search_xid or search_xid == "all":
                                 print("Found in block: " + str(file_id) + "," + str(i)
                                       + " block type: " + self.block_type.get(block_type, "OTHER"))
                             itl_pos += 24
