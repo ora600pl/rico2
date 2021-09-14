@@ -317,7 +317,35 @@ class Rico(object):
         dbf.close()
         dba = file_id * self.max_block + block_id
 
-        self.current_block_desc = {"DBA": dba, "FILE_ID": file_id, "FILE_NAME": self.file_names[file_id]}
+        self.current_block_desc = {"DBA": dba, "FILE_ID": file_id, "FILE_NAME": self.file_names[file_id], "BLOCK_ID": block_id}
+        self.parse_block()
+
+    def get_block_memory(self, pid, offset):
+        memfile = open("/proc/" + str(pid) + "/mem", "rb")
+        memfile.seek(offset)
+        self.block_data = memfile.read(self.block_size)
+        self.block_data_backup = self.block_data
+        memfile.close()
+        self.current_block_desc = {"DBA": -1, "FILE_ID": -1, "FILE_NAME": "N/A", "PID": str(pid), "BLOCK_ID": offset}
+        self.parse_block()
+
+    def yara_scan(self, pid, data_object_id, more_str="N/A"):
+        try:
+            __import__('imp').find_module('yara')
+            import yara
+            if more_str == "N/A":
+                yara_rule_txt = "rule emps { strings: $hs = { 06a2 [0-201] 01000000" + hexlify(self.uint.pack(data_object_id)) + " } condition: $hs }"
+                rules = yara.compile(source=yara_rule_txt)
+                matches = rules.match(pid=pid)
+                for m in matches:
+                    for s in m.strings:
+                        print str(s[0]) + "\t" + hexlify(s[2])
+
+        except ImportError:
+            print "You don't have YARA installed!"
+
+
+    def parse_block(self):
         block_type = self.ubyte.unpack(self.block_data[0:1])[0]
         block_subtype = self.ubyte.unpack(self.block_data[20:21])[0]
 
@@ -360,6 +388,10 @@ class Rico(object):
 
                 row_pointer_offset += 2
 
+
+        dba = self.current_block_desc['DBA']
+        file_id = self.current_block_desc['FILE_ID']
+        block_id = self.current_block_desc['BLOCK_ID']
         print("\tDBA\t\t" + str(hex(dba)) + " (" + str(dba) + " " + str(file_id) + "," + str(block_id) + ")")
 
     def p_kcbh(self):
@@ -786,7 +818,7 @@ if __name__ == '__main__':
 
     while cnt:
         try:
-            command = raw_input("rico2 > ").strip()
+            command = commandraw_input("rico2 > ").strip()
             if command == "exit":
                 cnt = False
             elif command.startswith("set blocksize"):
