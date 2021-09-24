@@ -203,6 +203,8 @@ class Rico(object):
                     h = self.row_header["head_piece"]
                     fl = self.row_header["first_data"] + self.row_header["last_data"]
                     f = self.row_header["first_data"]
+                    khfl = self.row_header["clustered_table_member"] + hfl
+
 
                     if row_header[0] == hfl or row_header[0] == hflcm or row_header[0] == h:
                         actual_rows += 1
@@ -299,6 +301,10 @@ class Rico(object):
                         file_no = int(nrid_b, 16) // self.max_block
                         self.kdbr_data[row]["NRID"] = nrid + " [file: " + str(file_no) + " block: " \
                                                       + str(block_no) + " kdbr: " + str(row_no) + " ]"
+
+                    elif row_header[0] == khfl:
+                        ncols = self.ubyte.unpack(self.block_data[row_pos:row_pos + 1])[0]
+                        print ncols, row_pos, row_pointer
 
                     row_pointer_offset += 2
 
