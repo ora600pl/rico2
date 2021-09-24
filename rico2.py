@@ -818,7 +818,7 @@ if __name__ == '__main__':
 
     while cnt:
         try:
-            command = commandraw_input("rico2 > ").strip()
+            command = raw_input("rico2 > ").strip()
             if command == "exit":
                 cnt = False
             elif command.startswith("set blocksize"):
