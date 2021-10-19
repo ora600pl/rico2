@@ -29,13 +29,19 @@ class OracleType(object):
     def __init__(self, data_hex, type_name = None):
         self.value_string = None
         self.ubyte = Struct("B")
-
-        if type_name == 't':
-            self.value_string = self.decode_date(data_hex)
-        elif type_name == 'n':
-            self.value_string = self.decode_number(data_hex)
-        elif type_name == 'c':
-            self.value_string = self.decode_string(data_hex)
+        
+        try:
+            if data_hex == "*NULL*":
+                self.value_string = data_hex
+            elif type_name == 't':
+                self.value_string = self.decode_date(data_hex)
+            elif type_name == 'n':
+                self.value_string = self.decode_number(data_hex)
+            elif type_name == 'c':
+                self.value_string = self.decode_string(data_hex)
+        except:
+            self.value_string = data_hex + "(" + type_name + ")"
+            raise
 
     def decode_date(self, data_hex):
         data_hex_b = unhexlify(data_hex)
@@ -138,6 +144,13 @@ class Rico(object):
 
         self.row_header = {"cluster_key": 128, "head_piece": 32, "first_data": 8, "first_column_from_prev_piece": 2,
                            "last_column_in_next_piece": 1, "clustered_table_member": 64, "deleted": 16, "last_data": 4}
+
+        self.yara_offsets = []
+        self.yara_offsets_xbh = []
+
+        self.PID = 4027
+        self.OBJ = 73751
+        self.ROW = "ncccctcnnnn"
 
     @staticmethod
     def help():
@@ -326,13 +339,30 @@ class Rico(object):
         self.current_block_desc = {"DBA": dba, "FILE_ID": file_id, "FILE_NAME": self.file_names[file_id], "BLOCK_ID": block_id}
         self.parse_block()
 
+    def get_block_memdump(self, fname, offset):
+        memfile = open(fname, "rb")
+        memfile.seek(offset)
+        self.block_data = memfile.read(self.block_size)
+        self.block_data_backup = self.block_data
+        memfile.close()
+        kcbh = self.struct_kcbh.unpack(self.block_data[0:20])
+        dba = kcbh[4]
+        file_id = dba // self.max_block
+        block_id = dba % self.max_block
+        self.current_block_desc = {"DBA": dba, "FILE_ID": file_id, "FILE_NAME": "N/A", "BLOCK_ID": str(block_id) + " @ " + str(offset)}
+        self.parse_block()
+
     def get_block_memory(self, pid, offset):
         memfile = open("/proc/" + str(pid) + "/mem", "rb")
         memfile.seek(offset)
         self.block_data = memfile.read(self.block_size)
         self.block_data_backup = self.block_data
         memfile.close()
-        self.current_block_desc = {"DBA": -1, "FILE_ID": -1, "FILE_NAME": "N/A", "PID": str(pid), "BLOCK_ID": offset}
+        kcbh = self.struct_kcbh.unpack(self.block_data[0:20])
+        dba = kcbh[4]
+        file_id = dba // self.max_block
+        block_id = dba % self.max_block
+        self.current_block_desc = {"DBA": dba, "FILE_ID": file_id, "FILE_NAME": "N/A", "PID": str(pid), "BLOCK_ID": str(block_id) + " @ " + str(offset)}
         self.parse_block()
 
     def yara_scan(self, pid, data_object_id, more_str="N/A"):
@@ -340,15 +370,59 @@ class Rico(object):
             __import__('imp').find_module('yara')
             import yara
             if more_str == "N/A":
-                yara_rule_txt = "rule emps { strings: $hs = { 06a2 [0-201] 01000000" + hexlify(self.uint.pack(data_object_id)) + " } condition: $hs }"
+                yara_rule_txt = "rule obj { strings: $hs = { 06a2 [0-201] 01000000" + hexlify(self.uint.pack(data_object_id)) + " } condition: $hs }"
                 rules = yara.compile(source=yara_rule_txt)
                 matches = rules.match(pid=pid)
                 for m in matches:
                     for s in m.strings:
                         print str(s[0]) + "\t" + hexlify(s[2])
+                        if len(hexlify(s[2])) == 56:
+                            self.yara_offsets.append(s[0])
 
         except ImportError:
             print "You don't have YARA installed!"
+
+
+    def yara_scan_bh(self, pid, data_object_id, more_str="N/A"):
+        try:
+            __import__('imp').find_module('yara')
+            import yara
+            if more_str == "N/A":
+                yara_rule_txt = "rule xbh { strings: $hs = { " + hexlify(self.uint.pack(data_object_id)) + " 000000010000200000000000 } condition: $hs }"
+                rules = yara.compile(source=yara_rule_txt)
+                matches = rules.match(pid=pid)
+                for m in matches:
+                    for s in m.strings:
+                        print str(s[0]) + "\t" + hexlify(s[2])
+                        self.yara_offsets_xbh.append(s[0])
+
+        except ImportError:
+            print "You don't have YARA installed!"
+
+    def dump_rows(self, pid, pattern, file_name):
+        f = open(file_name, "w")
+        for offset in self.yara_offsets:
+            self.get_block_memory(pid, offset)
+            rown = -1
+            for row in self.kdbr_data:
+                rown += 1
+                row_data = ""
+                if row.get('COL_DATA') and len(row['COL_DATA']) > 0:
+                    print "Dumping row: ", rown, " block: ", self.current_block_desc["BLOCK_ID"]
+                    dumpColumns = len(row['COL_DATA'])
+                    if len(pattern) < dumpColumns:
+                        dumpColumns = len(pattern)
+
+                    for col in range(dumpColumns):
+                        try:
+                            ot = OracleType(row['COL_DATA'][col][2], pattern[col])
+                            row_data += str(ot.value_string) + " "
+                        except BaseException as e:
+                            print str(e)
+                            print row['COL_DATA'][col][2], pattern[col], rown
+                            #raise
+                    f.write(row_data + "\n")
+        f.close()
 
 
     def parse_block(self):
