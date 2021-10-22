@@ -388,7 +388,7 @@ class Rico(object):
             __import__('imp').find_module('yara')
             import yara
             if more_str == "N/A":
-                yara_rule_txt = "rule xbh { strings: $hs = { " + hexlify(self.uint.pack(data_object_id)) + " 000000010000200000000000 } condition: $hs }"
+                yara_rule_txt = "rule xbh { strings: $hs = { " + hexlify(self.uint.pack(data_object_id)) + " 000000010000200000000000 } $hs2 = { " + hexlify(self.uint.pack(data_object_id)) + " 0000000100000800000000} condition: $hs or $hs2 }"
                 rules = yara.compile(source=yara_rule_txt)
                 matches = rules.match(pid=pid)
                 for m in matches:
