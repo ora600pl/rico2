@@ -148,8 +148,8 @@ class Rico(object):
         self.yara_offsets = []
         self.yara_offsets_xbh = []
 
-        self.PID = 4027
-        self.OBJ = 73751
+        self.PID = 26807
+        self.OBJ = 75178
         self.ROW = "ncccctcnnnn"
 
     @staticmethod
@@ -388,7 +388,7 @@ class Rico(object):
             __import__('imp').find_module('yara')
             import yara
             if more_str == "N/A":
-                yara_rule_txt = "rule xbh { strings: $hs = { " + hexlify(self.uint.pack(data_object_id)) + " 000000010000200000000000 } $hs2 = { " + hexlify(self.uint.pack(data_object_id)) + " 0000000100000800000000} condition: $hs or $hs2 }"
+                yara_rule_txt = "rule xbh { strings: $hs = { " + hexlify(self.uint.pack(data_object_id)) + " 000000010000200000000000 } $hs2 = { " + hexlify(self.uint.pack(data_object_id)) + " 0000000100000800000000} $hs3 = { " + hexlify(self.uint.pack(data_object_id)) + " 0000000100202800000000} $hs4 = { " + hexlify(self.uint.pack(data_object_id)) + " 0000000100200800000000}  $hs5 = { " + hexlify(self.uint.pack(data_object_id)) + " 0000000100200000000000}  condition: $hs or $hs2 or $hs3 or $hs4 or $hs5 }"
                 rules = yara.compile(source=yara_rule_txt)
                 matches = rules.match(pid=pid)
                 for m in matches:
@@ -398,6 +398,19 @@ class Rico(object):
 
         except ImportError:
             print "You don't have YARA installed!"
+
+    def dump_memory_offset(self, pid, offset, size):
+        f = open("/proc/" + str(pid) + "/mem", "rb")
+        f.seek(offset)
+        print hexlify(f.read(size))
+        f.close()
+
+    def set_dirty_flag_bh(self, pid, offset):
+        flag = unhexlify("01000000")
+        f = open("/proc/" + str(pid) + "/mem", "rb+")
+        f.seek(offset+8)
+        f.write(flag)
+        f.close()
 
     def dump_rows(self, pid, pattern, file_name):
         f = open(file_name, "w")
