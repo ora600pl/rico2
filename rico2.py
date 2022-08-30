@@ -405,10 +405,11 @@ class Rico(object):
         print hexlify(f.read(size))
         f.close()
 
-    def set_dirty_flag_bh(self, pid, offset):
+    #dirty flaag is +8 bytes from DATA_OBJECT_ID and +16 bytes from block id
+    def set_dirty_flag_bh(self, pid, offset): 
         flag = unhexlify("01000000")
         f = open("/proc/" + str(pid) + "/mem", "rb+")
-        f.seek(offset+8)
+        f.seek(offset)
         f.write(flag)
         f.close()
 
