@@ -89,7 +89,7 @@ class OracleType(object):
 
 
 class Rico(object):
-    def __init__(self):
+    def __init__(self, pid = None):
         self.uint = Struct("I")
         self.uint2 = Struct("II")
         self.ubyte = Struct("B")
@@ -151,6 +151,9 @@ class Rico(object):
         self.PID = 26807
         self.OBJ = 75178
         self.ROW = "ncccctcnnnn"
+
+        if pid is not None:
+            self.PID = pid
 
     @staticmethod
     def help():
@@ -352,7 +355,8 @@ class Rico(object):
         self.current_block_desc = {"DBA": dba, "FILE_ID": file_id, "FILE_NAME": "N/A", "BLOCK_ID": str(block_id) + " @ " + str(offset)}
         self.parse_block()
 
-    def get_block_memory(self, pid, offset):
+    def get_block_memory(self, offset):
+        pid = self.PID
         memfile = open("/proc/" + str(pid) + "/mem", "rb")
         memfile.seek(offset)
         self.block_data = memfile.read(self.block_size)
@@ -365,7 +369,8 @@ class Rico(object):
         self.current_block_desc = {"DBA": dba, "FILE_ID": file_id, "FILE_NAME": "N/A", "PID": str(pid), "BLOCK_ID": str(block_id) + " @ " + str(offset)}
         self.parse_block()
 
-    def yara_scan(self, pid, data_object_id, more_str="N/A"):
+    def yara_scan(self, data_object_id, more_str="N/A"):
+        pid = self.PID
         try:
             __import__('imp').find_module('yara')
             import yara
@@ -383,7 +388,8 @@ class Rico(object):
             print "You don't have YARA installed!"
 
 
-    def yara_scan_bh(self, pid, data_object_id, more_str="N/A"):
+    def yara_scan_bh(self, data_object_id, more_str="N/A"):
+        pid = self.PID
         try:
             __import__('imp').find_module('yara')
             import yara
@@ -399,21 +405,23 @@ class Rico(object):
         except ImportError:
             print "You don't have YARA installed!"
 
-    def dump_memory_offset(self, pid, offset, size):
+    def dump_memory_offset(self, offset, size):
+        pid = self.PID
         f = open("/proc/" + str(pid) + "/mem", "rb")
         f.seek(offset)
         print hexlify(f.read(size))
         f.close()
 
-    #dirty flaag is +8 bytes from DATA_OBJECT_ID and +16 bytes from block id
-    def set_dirty_flag_bh(self, pid, offset): 
+    def set_dirty_flag_bh(self, offset):
+        pid = self.PID
         flag = unhexlify("01000000")
         f = open("/proc/" + str(pid) + "/mem", "rb+")
         f.seek(offset)
         f.write(flag)
         f.close()
 
-    def dump_rows(self, pid, pattern, file_name):
+    def dump_rows(self, pattern, file_name):
+        pid = self.PID
         f = open(file_name, "w")
         for offset in self.yara_offsets:
             self.get_block_memory(pid, offset)
