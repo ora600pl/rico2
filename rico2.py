@@ -18,11 +18,30 @@
 # ------------------------------------------------------------------------------
 
 from struct import Struct
+import importlib.util
 import os
 import sys
-from binascii import hexlify
-from binascii import unhexlify
+from binascii import hexlify as _hexlify
+from binascii import unhexlify as _unhexlify
 from decimal import Decimal
+
+
+def hexlify(data):
+    if isinstance(data, str):
+        data = data.encode("utf-8")
+    return _hexlify(data).decode("ascii")
+
+
+def unhexlify(data):
+    if isinstance(data, str):
+        data = data.encode("ascii")
+    return _unhexlify(data)
+
+
+def text_to_bytes(data):
+    if isinstance(data, bytes):
+        return data
+    return data.encode("utf-8")
 
 
 class OracleType(object):
@@ -45,43 +64,39 @@ class OracleType(object):
 
     def decode_date(self, data_hex):
         data_hex_b = unhexlify(data_hex)
-        century = "{0:02d}".format(self.ubyte.unpack(data_hex_b[0])[0] - 100)
-        year = "{0:02d}".format(self.ubyte.unpack(data_hex_b[1])[0] - 100)
-        month = "{0:02d}".format(self.ubyte.unpack(data_hex_b[2])[0])
-        day = "{0:02d}".format(self.ubyte.unpack(data_hex_b[3])[0])
-        hour = "{0:02d}".format(self.ubyte.unpack(data_hex_b[4])[0] - 1)
-        minute = "{0:02d}".format(self.ubyte.unpack(data_hex_b[5])[0] - 1)
-        second = "{0:02d}".format(self.ubyte.unpack(data_hex_b[6])[0] - 1)
+        century = "{0:02d}".format(data_hex_b[0] - 100)
+        year = "{0:02d}".format(data_hex_b[1] - 100)
+        month = "{0:02d}".format(data_hex_b[2])
+        day = "{0:02d}".format(data_hex_b[3])
+        hour = "{0:02d}".format(data_hex_b[4] - 1)
+        minute = "{0:02d}".format(data_hex_b[5] - 1)
+        second = "{0:02d}".format(data_hex_b[6] - 1)
 
         date_string = century + year + "-" + month + "-" + day + ":" + hour + ":" + minute + ":" + second
         return date_string
 
     def decode_string(self, data_hex, characterset=None):
-        if characterset is not None:
-            str_data = unhexlify(data_hex).decode(characterset)
-            return str_data
-        else:
-            return unhexlify(data_hex)
+        return unhexlify(data_hex).decode(characterset or "latin-1")
 
     def decode_number(self, data_hex):
         data_hex_b = unhexlify(data_hex)
         if data_hex == "80":
             return 0
 
-        if Struct("B").unpack(data_hex_b[-1])[0] != 102:
-            exPot = Struct("B").unpack(data_hex_b[0])[0] - 193
+        if data_hex_b[-1] != 102:
+            exPot = data_hex_b[0] - 193
             numberValue = "0."
             exPot = exPot * 2 + 2
 
-            for i in range(1, len(data_hex_b)):
-                numberValue += "{0:02d}".format(Struct("B").unpack(data_hex_b[i])[0] - 1)
+            for value in data_hex_b[1:]:
+                numberValue += "{0:02d}".format(value - 1)
         else:
-            exPot = 62 - Struct("B").unpack(data_hex_b[0])[0]
+            exPot = 62 - data_hex_b[0]
             numberValue = "-0."
             exPot = exPot * 2 + 2
 
-            for i in range(1, len(data_hex_b) - 1):
-                numberValue += "{0:02d}".format(101 - Struct("B").unpack(data_hex_b[i])[0])
+            for value in data_hex_b[1:-1]:
+                numberValue += "{0:02d}".format(101 - value)
 
         fVal = Decimal(numberValue)
         powVal = Decimal(10) ** Decimal(exPot)
@@ -162,7 +177,7 @@ class Rico(object):
         print("If you know how to use BBED, you will know how to use this one.")
         print("Not everything is documented but in most cases the code is trivial to interpret it.")
         print("So if you don't know how to use this tool - then maybe you shouldn't ;)")
-        print("\nUsage: python2.7 rico2.py listfile.txt")
+        print("\nUsage: python3 rico2.py listfile.txt")
         print("The listfile.txt should contain the list of the DBF files you want to read")
 
         print("\n !!! CAUTION !!!! \n")
@@ -320,7 +335,7 @@ class Rico(object):
 
                     elif row_header[0] == khfl:
                         ncols = self.ubyte.unpack(self.block_data[row_pos:row_pos + 1])[0]
-                        print ncols, row_pos, row_pointer
+                        print(ncols, row_pos, row_pointer)
 
                     row_pointer_offset += 2
 
@@ -372,7 +387,8 @@ class Rico(object):
     def yara_scan(self, data_object_id, more_str="N/A"):
         pid = self.PID
         try:
-            __import__('imp').find_module('yara')
+            if importlib.util.find_spec('yara') is None:
+                raise ImportError
             import yara
             if more_str == "N/A":
                 yara_rule_txt = "rule obj { strings: $hs = { 06a2 [0-201] 01000000" + hexlify(self.uint.pack(data_object_id)) + " } condition: $hs }"
@@ -380,18 +396,19 @@ class Rico(object):
                 matches = rules.match(pid=pid)
                 for m in matches:
                     for s in m.strings:
-                        print str(s[0]) + "\t" + hexlify(s[2])
+                        print(str(s[0]) + "\t" + hexlify(s[2]))
                         if len(hexlify(s[2])) == 56:
                             self.yara_offsets.append(s[0])
 
         except ImportError:
-            print "You don't have YARA installed!"
+            print("You don't have YARA installed!")
 
 
     def yara_scan_bh(self, data_object_id, more_str="N/A"):
         pid = self.PID
         try:
-            __import__('imp').find_module('yara')
+            if importlib.util.find_spec('yara') is None:
+                raise ImportError
             import yara
             if more_str == "N/A":
                 yara_rule_txt = "rule xbh { strings: $hs = { " + hexlify(self.uint.pack(data_object_id)) + " 000000010000200000000000 } $hs2 = { " + hexlify(self.uint.pack(data_object_id)) + " 0000000100000800000000} $hs3 = { " + hexlify(self.uint.pack(data_object_id)) + " 0000000100202800000000} $hs4 = { " + hexlify(self.uint.pack(data_object_id)) + " 0000000100200800000000}  $hs5 = { " + hexlify(self.uint.pack(data_object_id)) + " 0000000100200000000000}  condition: $hs or $hs2 or $hs3 or $hs4 or $hs5 }"
@@ -399,17 +416,17 @@ class Rico(object):
                 matches = rules.match(pid=pid)
                 for m in matches:
                     for s in m.strings:
-                        print str(s[0]) + "\t" + hexlify(s[2])
+                        print(str(s[0]) + "\t" + hexlify(s[2]))
                         self.yara_offsets_xbh.append(s[0])
 
         except ImportError:
-            print "You don't have YARA installed!"
+            print("You don't have YARA installed!")
 
     def dump_memory_offset(self, offset, size):
         pid = self.PID
         f = open("/proc/" + str(pid) + "/mem", "rb")
         f.seek(offset)
-        print hexlify(f.read(size))
+        print(hexlify(f.read(size)))
         f.close()
 
     def set_dirty_flag_bh(self, offset):
@@ -424,13 +441,13 @@ class Rico(object):
         pid = self.PID
         f = open(file_name, "w")
         for offset in self.yara_offsets:
-            self.get_block_memory(pid, offset)
+            self.get_block_memory(offset)
             rown = -1
             for row in self.kdbr_data:
                 rown += 1
                 row_data = ""
                 if row.get('COL_DATA') and len(row['COL_DATA']) > 0:
-                    print "Dumping row: ", rown, " block: ", self.current_block_desc["BLOCK_ID"]
+                    print("Dumping row: ", rown, " block: ", self.current_block_desc["BLOCK_ID"])
                     dumpColumns = len(row['COL_DATA'])
                     if len(pattern) < dumpColumns:
                         dumpColumns = len(pattern)
@@ -440,8 +457,8 @@ class Rico(object):
                             ot = OracleType(row['COL_DATA'][col][2], pattern[col])
                             row_data += str(ot.value_string) + " "
                         except BaseException as e:
-                            print str(e)
-                            print row['COL_DATA'][col][2], pattern[col], rown
+                            print(str(e))
+                            print(row['COL_DATA'][col][2], pattern[col], rown)
                             #raise
                     f.write(row_data + "\n")
         f.close()
@@ -741,8 +758,13 @@ class Rico(object):
     def mask_printable(self, in_bytes):
         ret_str = ""
         for c in in_bytes:
-            if ord(c) < 128 and ord(c) >= 32:
-                ret_str += c
+            if isinstance(c, int):
+                value = c
+            else:
+                value = ord(c)
+
+            if value < 128 and value >= 32:
+                ret_str += chr(value)
             else:
                 ret_str += "."
 
@@ -759,7 +781,7 @@ class Rico(object):
         print("Current block data successfully saved to disk. To revert changes, type: dupa")
 
     def dupa(self):
-        dbf = open(self.file_names[file_id], "r+b")
+        dbf = open(self.current_block_desc["FILE_NAME"], "r+b")
         block_id = self.current_block_desc["DBA"] & (self.max_block - 1)
         dbf.seek(block_id * self.block_size)
         dbf.write(self.block_data_backup)
@@ -789,12 +811,14 @@ class Rico(object):
     def modify(self, hex_string, byte_string):
         if hex_string != "42bee125":
             byte_string = unhexlify(hex_string)
+        else:
+            byte_string = text_to_bytes(byte_string)
 
         block_id = self.current_block_desc["DBA"] & (self.max_block - 1)
         print("You want to modify block: " + str(block_id) + " at offset: " + str(self.current_offset))
         print("New value: " + hexlify(byte_string))
 
-        yesno = raw_input("Are you sure? (Y/N)  ").upper()
+        yesno = input("Are you sure? (Y/N)  ").upper()
 
         if yesno == "Y":
             new_value_len = len(byte_string)
@@ -815,6 +839,8 @@ class Rico(object):
                 search_string = unhexlify(search_hex)
             elif search_string == ".":
                 search_only_blocks_for_objd = True
+            else:
+                search_string = text_to_bytes(search_string)
 
             if block_id == -1 and file_id == -1:
                 file_id = self.current_block_desc["FILE_ID"]
@@ -842,12 +868,12 @@ class Rico(object):
                 dbf = open(self.file_names[file_id], "rb")
                 dbf.seek(0, os.SEEK_END)
                 fsize = dbf.tell()
-                blocks = fsize / self.block_size
+                blocks = fsize // self.block_size
 
                 for i in range(1, blocks):
                     dbf.seek(i * self.block_size)
                     block = dbf.read(self.block_size)
-                    block_type = self.ubyte.unpack(block[0])[0]
+                    block_type = self.ubyte.unpack(block[0:1])[0]
                     objd_offset = self.offset_objd.get(block_type, -1)
                     if objd_offset != -1:
                         objd = self.uint.unpack(block[objd_offset:objd_offset+4])[0]
@@ -877,13 +903,13 @@ class Rico(object):
                 dbf = open(file_names[file_id], "rb")
                 dbf.seek(0, os.SEEK_END)
                 fsize = dbf.tell()
-                blocks = fsize / self.block_size
+                blocks = fsize // self.block_size
                 # print("Searching in file: " + self.file_names[file_id] + " blocks: " + str(blocks))
                 for i in range(1, blocks):
                     # print("\tsearching block: " + str(i))
                     dbf.seek(i * self.block_size)
                     block = dbf.read(self.block_size)
-                    block_type = self.ubyte.unpack(block[0])[0]
+                    block_type = self.ubyte.unpack(block[0:1])[0]
                     objd_offset = self.offset_objd.get(block_type, -1)
                     if objd_offset != -1:
                         objd = self.uint.unpack(block[objd_offset:objd_offset+4])[0]
@@ -920,7 +946,7 @@ if __name__ == '__main__':
 
     while cnt:
         try:
-            command = raw_input("rico2 > ").strip()
+            command = input("rico2 > ").strip()
             if command == "exit":
                 cnt = False
             elif command.startswith("set blocksize"):
@@ -957,7 +983,7 @@ if __name__ == '__main__':
                 rico.p_kdbh()
             elif command.startswith("p tailchk"):
                 rico.p_tailchk()
-            elif command.startswith("x") and command.split() >= 2:
+            elif command.startswith("x") and len(command.split()) >= 2:
                 rico.examine(command.split()[1])
             elif command.startswith("d"):
                 rico.dump()
