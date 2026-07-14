@@ -466,6 +466,12 @@ RICO2 distinguishes leaf and branch blocks using the `kdxcolev` index level. Lev
 
 Requesting an incompatible structure produces a diagnostic error instead of interpreting the block with the wrong layout.
 
+The physical start of `kdxle` or `kdxbr` is not always immediately after the ITL array. RICO2 interprets the `ktbbhflg` extension flags and any variable extension length in the same way as BBED. Consequently, blocks with the same reported `ktbbh` size may place the index header at different offsets, for example `@92` or `@100`.
+
+`kd_off` elements are signed 16-bit values. Initial directory slots may be metadata pointers, pad pointers, zero values, or negative sentinels rather than index records. Therefore, `kd_off[0]` is not guaranteed to be the first decodable entry. Use `PRINT kd_off` to inspect the directory and dereference a slot whose resolved offset lies inside the reported rowdata area. RICO2 reports pad and negative sentinel slots explicitly.
+
+Leaf entry layout also depends on `kdxledsz`. With `DSZ=6`, a six-byte physical ROWID precedes the key columns. With `DSZ=8`, the entry contains a six-byte ROWID plus a two-byte data suffix before the key. With `DSZ=0`, the ROWID is normally encoded as the final six-byte item in the `kdxconco` column list, as used by non-unique indexes. RICO2 handles all three layouts and reports the ROWID separately from the logical key columns.
+
 Example leaf entry:
 
 ```text
@@ -1048,6 +1054,7 @@ Interactive command failures are printed with a `Command failed:` prefix. Common
 | `DIRTY Yes` | the buffer differs from its snapshot; use `UNDO` or intentionally `SAVE` |
 | `Verification failed` | DBA, checksum, boundaries, offsets, or decoded structures are inconsistent |
 | special index entry format | only `raw=...` is available; semantic decoding is not implemented |
+| `kd_off[n]` points to pad or is a negative sentinel | the directory slot is metadata, not an index record; inspect `PRINT kd_off` and select a slot inside rowdata |
 
 If output appears incorrect:
 

@@ -116,7 +116,7 @@ class RicoCommandTests(unittest.TestCase):
         block[36] = 2
         base = 92
         block[base:base + 32] = struct.pack(
-            "<BBBBIhhhhhhIIBB2x", 0, 0, 0x80, 3, 2, 3, 42, 100, 58,
+            "<BBBBIhhhhhhIIBB2x", 0, 0, 0x80, 2, 2, 3, 42, 100, 58,
             0, 0, 0, 0, 6, 0)
         block[124:130] = struct.pack("HHH", 120, 0, 96)
         rowid = (4194314).to_bytes(4, "big") + (2).to_bytes(2, "big")
@@ -131,6 +131,69 @@ class RicoCommandTests(unittest.TestCase):
         self.assertEqual(["80", "414243"], [column[2] for column in entry["COL_DATA"]])
         _, output = self.run_command("print *kd_off[2]")
         self.assertIn("rowid=", output)
+        _, output = self.run_command("verify")
+        self.assertIn("Verification passed", output)
+
+    def test_index_leaf_with_ktb_extension_and_signed_sentinels(self):
+        block = bytearray(self.block_size)
+        block[0] = 6
+        block[4:8] = struct.pack("I", 4194305)
+        block[20] = 2
+        block[36] = 2
+        block[38] = 0x32
+        base = 100
+        block[base:base + 32] = struct.pack(
+            "<BBBBIhhhhhhIIBB2x", 0, 0, 0x80, 1, 0, 3, 42, 100, 58,
+            0, 0, 0, 0, 6, 0)
+        block[132:138] = struct.pack("<hhh", 120, -16205, 96)
+        rowid = (4194314).to_bytes(4, "big") + (2).to_bytes(2, "big")
+        block[196:207] = b"\x00\x00" + rowid + b"\x02\xc2\x02"
+        self.load_synthetic_block(block)
+
+        self.assertEqual(100, self.rico.index_header["OFFSET"])
+        self.assertEqual(132, self.rico.index_header["OFFSETS_START"])
+        self.assertEqual(196, self.rico.index_header["ROWDATA_START"])
+        self.assertEqual(216, self.rico.index_header["ROWDATA_END"])
+        self.assertEqual(-16205, self.rico.index_offsets[1][1])
+        self.assertIsNone(self.rico.index_offsets[1][2])
+        self.assertEqual([2], [entry["SLOT"] for entry in self.rico.index_entries])
+        self.assertEqual(["c202"], [column[2] for column in self.rico.index_entries[0]["COL_DATA"]])
+        _, output = self.run_command("map")
+        self.assertIn("kdxle, 32 bytes", output)
+        self.assertIn("@100", output)
+        _, output = self.run_command("print *kd_off[2]")
+        self.assertIn("rowid=", output)
+        self.assertIn("c202", output)
+        with self.assertRaisesRegex(ValueError, "points to pad"):
+            self.run_command("print *kd_off[0]")
+        with self.assertRaisesRegex(ValueError, "negative sentinel"):
+            self.run_command("print *kd_off[1]")
+        _, output = self.run_command("verify")
+        self.assertIn("Verification passed", output)
+
+    def test_index_leaf_with_rowid_encoded_as_last_column(self):
+        block = bytearray(self.block_size)
+        block[0] = 6
+        block[4:8] = struct.pack("I", 4194305)
+        block[20] = 2
+        block[36] = 2
+        base = 92
+        block[base:base + 32] = struct.pack(
+            "<BBBBIhhhhhhIIBB2x", 0, 0, 0x80, 2, 0, 3, 42, 100, 58,
+            0, 0, 0, 0, 0, 0)
+        block[124:130] = struct.pack("<hhh", 120, 0, 96)
+        rowid = (4194314).to_bytes(4, "big") + (2).to_bytes(2, "big")
+        block[188:200] = b"\x00\x00\x02\xc1\x02\x06" + rowid
+        self.load_synthetic_block(block)
+
+        self.assertEqual(1, len(self.rico.index_entries))
+        entry = self.rico.index_entries[0]
+        self.assertEqual(2, entry["PARSED_NCOLS"])
+        self.assertEqual(["c102"], [column[2] for column in entry["COL_DATA"]])
+        self.assertEqual(10, entry["ROWID"]["BLOCK_ID"])
+        _, output = self.run_command("print *kd_off[2]")
+        self.assertIn("rowid=", output)
+        self.assertIn("c102", output)
         _, output = self.run_command("verify")
         self.assertIn("Verification passed", output)
 
