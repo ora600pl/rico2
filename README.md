@@ -461,6 +461,8 @@ If a row cannot be decoded safely, the parser preserves a parse error for verifi
 | `PRINT kd_off` | complete index entry offset table |
 | `PRINT kd_off[n]` | offset for index entry `n` |
 | `PRINT *kd_off[n]` | decoded leaf or branch entry `n` |
+| `PRINT index_entries` | ordered list of logical leaf entries and their physical source |
+| `PRINT *index_entry[n]` | decoded logical leaf entry `n`, including entries without a direct `kd_off` pointer |
 
 RICO2 distinguishes leaf and branch blocks using the `kdxcolev` index level. Level `0` means leaf. A value greater than zero means branch.
 
@@ -468,7 +470,9 @@ Requesting an incompatible structure produces a diagnostic error instead of inte
 
 The physical start of `kdxle` or `kdxbr` is not always immediately after the ITL array. RICO2 interprets the `ktbbhflg` extension flags and any variable extension length in the same way as BBED. Consequently, blocks with the same reported `ktbbh` size may place the index header at different offsets, for example `@92` or `@100`.
 
-`kd_off` elements are signed 16-bit values. Initial directory slots may be metadata pointers, pad pointers, zero values, or negative sentinels rather than index records. Therefore, `kd_off[0]` is not guaranteed to be the first decodable entry. Use `PRINT kd_off` to inspect the directory and dereference a slot whose resolved offset lies inside the reported rowdata area. RICO2 reports pad and negative sentinel slots explicitly.
+`kd_off` elements are signed 16-bit values. Initial directory slots may be metadata pointers, pad pointers, zero values, or negative sentinels rather than index records. Therefore, `kd_off[0]` is not guaranteed to be the first decodable entry. Use `PRINT kd_off` to inspect the physical directory. Use `PRINT index_entries` and `PRINT *index_entry[n]` when the goal is to inspect records in logical key order.
+
+Some leaf blocks contain committed records between `kdxcofeo` and the first row referenced by an ordinary `kd_off` element. RICO2 parses this FEO gap sequentially, marks its records as `source=FEO gap`, and appends them to the logical entry list in key order. The physical `kd_off[0]` and `kd_off[1]` values remain visible as pad or sentinel values, matching BBED, while the logical commands expose every decoded record.
 
 Leaf entry layout also depends on `kdxledsz`. With `DSZ=6`, a six-byte physical ROWID precedes the key columns. With `DSZ=8`, the entry contains a six-byte ROWID plus a two-byte data suffix before the key. With `DSZ=0`, the ROWID is normally encoded as the final six-byte item in the `kdxconco` column list, as used by non-unique indexes. RICO2 handles all three layouts and reports the ROWID separately from the logical key columns.
 
@@ -485,11 +489,22 @@ col 1[3] @4260: 4a4f45
 
 `rowid` points to a table row as `file`, `block`, and `slot`. Key columns are shown as raw hexadecimal bytes.
 
+Example logical entry recovered from an FEO gap:
+
+```text
+rico2 > print *index_entry[106]
+logical index_entry[106] @6850
+source=FEO gap (no direct kd_off pointer)
+flag=0x0 lock=0x0
+rowid=030000940008 [file: 12 block: 148 slot: 8]
+col 0[3] @6858: c20307
+```
+
 Example branch entry:
 
 ```text
-rico2 > print *kd_off[0]
-index entry kd_off[0] @8050
+rico2 > print *kd_off[2]
+index entry kd_off[2] @8050
 flag=0x0 lock=0x0
 child dba=0x410feb [file: 1 block: 69611]
 col 0[2] @8058: c102
@@ -1054,7 +1069,7 @@ Interactive command failures are printed with a `Command failed:` prefix. Common
 | `DIRTY Yes` | the buffer differs from its snapshot; use `UNDO` or intentionally `SAVE` |
 | `Verification failed` | DBA, checksum, boundaries, offsets, or decoded structures are inconsistent |
 | special index entry format | only `raw=...` is available; semantic decoding is not implemented |
-| `kd_off[n]` points to pad or is a negative sentinel | the directory slot is metadata, not an index record; inspect `PRINT kd_off` and select a slot inside rowdata |
+| `kd_off[n]` points to pad or is a negative sentinel | the directory slot is metadata, not an index record; use `PRINT index_entries` and `PRINT *index_entry[n]` for logical leaf records |
 
 If output appears incorrect:
 

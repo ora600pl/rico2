@@ -118,9 +118,9 @@ class RicoCommandTests(unittest.TestCase):
         block[base:base + 32] = struct.pack(
             "<BBBBIhhhhhhIIBB2x", 0, 0, 0x80, 2, 2, 3, 42, 100, 58,
             0, 0, 0, 0, 6, 0)
-        block[124:130] = struct.pack("HHH", 120, 0, 96)
+        block[124:130] = struct.pack("HHH", 124, 0, 100)
         rowid = (4194314).to_bytes(4, "big") + (2).to_bytes(2, "big")
-        block[188:202] = b"\x00\x00" + rowid + b"\x01\x80\x03ABC"
+        block[192:206] = b"\x00\x00" + rowid + b"\x01\x80\x03ABC"
         self.load_synthetic_block(block)
 
         self.assertEqual("LEAF", self.rico.index_header["KIND"])
@@ -145,25 +145,37 @@ class RicoCommandTests(unittest.TestCase):
         block[base:base + 32] = struct.pack(
             "<BBBBIhhhhhhIIBB2x", 0, 0, 0x80, 1, 0, 3, 42, 100, 58,
             0, 0, 0, 0, 6, 0)
-        block[132:138] = struct.pack("<hhh", 120, -16205, 96)
-        rowid = (4194314).to_bytes(4, "big") + (2).to_bytes(2, "big")
-        block[196:207] = b"\x00\x00" + rowid + b"\x02\xc2\x02"
+        block[132:138] = struct.pack("<hhh", 144, -16205, 124)
+        rowid = (4194314).to_bytes(4, "big")
+        block[200:212] = b"\x00\x00" + rowid + (4).to_bytes(2, "big") + b"\x03\xc2\x03\x07"
+        block[212:224] = b"\x00\x00" + rowid + (3).to_bytes(2, "big") + b"\x03\xc2\x03\x06"
+        block[224:236] = b"\x00\x00" + rowid + (2).to_bytes(2, "big") + b"\x03\xc2\x03\x05"
         self.load_synthetic_block(block)
 
         self.assertEqual(100, self.rico.index_header["OFFSET"])
         self.assertEqual(132, self.rico.index_header["OFFSETS_START"])
         self.assertEqual(196, self.rico.index_header["ROWDATA_START"])
-        self.assertEqual(216, self.rico.index_header["ROWDATA_END"])
+        self.assertEqual(240, self.rico.index_header["ROWDATA_END"])
         self.assertEqual(-16205, self.rico.index_offsets[1][1])
         self.assertIsNone(self.rico.index_offsets[1][2])
-        self.assertEqual([2], [entry["SLOT"] for entry in self.rico.index_entries])
-        self.assertEqual(["c202"], [column[2] for column in self.rico.index_entries[0]["COL_DATA"]])
+        self.assertEqual([2], [
+            entry["SLOT"] for entry in self.rico.index_entries if entry["SOURCE"] == "KD_OFF"])
+        self.assertEqual(3, len(self.rico.index_logical_entries))
+        self.assertEqual(["c20305", "c20306", "c20307"], [
+            entry["COL_DATA"][0][2] for entry in self.rico.index_logical_entries])
+        self.assertEqual(["KD_OFF", "FEO_GAP", "FEO_GAP"], [
+            entry["SOURCE"] for entry in self.rico.index_logical_entries])
         _, output = self.run_command("map")
         self.assertIn("kdxle, 32 bytes", output)
         self.assertIn("@100", output)
         _, output = self.run_command("print *kd_off[2]")
         self.assertIn("rowid=", output)
-        self.assertIn("c202", output)
+        self.assertIn("c20305", output)
+        _, output = self.run_command("print index_entries")
+        self.assertIn("FEO gap", output)
+        _, output = self.run_command("print *index_entry[2]")
+        self.assertIn("source=FEO gap", output)
+        self.assertIn("c20307", output)
         with self.assertRaisesRegex(ValueError, "points to pad"):
             self.run_command("print *kd_off[0]")
         with self.assertRaisesRegex(ValueError, "negative sentinel"):
@@ -181,9 +193,9 @@ class RicoCommandTests(unittest.TestCase):
         block[base:base + 32] = struct.pack(
             "<BBBBIhhhhhhIIBB2x", 0, 0, 0x80, 2, 0, 3, 42, 100, 58,
             0, 0, 0, 0, 0, 0)
-        block[124:130] = struct.pack("<hhh", 120, 0, 96)
+        block[124:130] = struct.pack("<hhh", 124, 0, 100)
         rowid = (4194314).to_bytes(4, "big") + (2).to_bytes(2, "big")
-        block[188:200] = b"\x00\x00\x02\xc1\x02\x06" + rowid
+        block[192:204] = b"\x00\x00\x02\xc1\x02\x06" + rowid
         self.load_synthetic_block(block)
 
         self.assertEqual(1, len(self.rico.index_entries))

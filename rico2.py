@@ -173,6 +173,7 @@ class Rico(object):
         self.index_header = None
         self.index_offsets = []
         self.index_entries = []
+        self.index_logical_entries = []
 
         self.row_header = {"cluster_key": 128, "head_piece": 32, "first_data": 8, "first_column_from_prev_piece": 2,
                            "last_column_in_next_piece": 1, "clustered_table_member": 64, "deleted": 16, "last_data": 4}
@@ -331,6 +332,36 @@ class Rico(object):
             pos += col_len
         return columns, pos
 
+    def _decode_index_leaf_entry(self, entry, header, end):
+        real = entry["OFFSET"]
+        if header["ENTRY_FORMAT"] == "RAW":
+            entry["RAW"] = hexlify(self.block_data[real:end])
+            return entry
+        if real + 2 + header["DSZ"] > end:
+            raise ValueError("truncated leaf entry")
+
+        entry["FLAG"] = self.block_data[real]
+        entry["LOCK"] = self.block_data[real + 1]
+        column_start = real + 2
+        if header["DSZ"]:
+            entry["DATA"] = self.block_data[column_start:column_start + header["DSZ"]]
+            if header["DSZ"] >= 6:
+                entry["ROWID"] = self.decode_rowid(entry["DATA"][:6])
+            if header["DSZ"] > 6:
+                entry["DATA_SUFFIX"] = hexlify(entry["DATA"][6:])
+            column_start += header["DSZ"]
+
+        parsed_columns, entry["DATA_END"] = self._parse_columns(
+            column_start, header["NCOLS"], end)
+        entry["PARSED_NCOLS"] = len(parsed_columns)
+        entry["COL_DATA"] = parsed_columns
+        if header["DSZ"] == 0 and parsed_columns and parsed_columns[-1][0] == 6:
+            rowid_column = parsed_columns[-1]
+            entry["ROWID"] = self.decode_rowid(unhexlify(rowid_column[2]))
+            entry["ROWID_COLUMN"] = rowid_column
+            entry["COL_DATA"] = parsed_columns[:-1]
+        return entry
+
     def get_index_details(self):
         end_of_ktbbh = 20 + 24 + self.current_block_desc["ITLS"] * 24
         ktbbh_flags = self.block_data[38]
@@ -413,35 +444,13 @@ class Rico(object):
                 continue
             next_offsets = [value for value in boundaries if value > real]
             end = next_offsets[0] if next_offsets else header["ROWDATA_END"]
-            entry = {"SLOT": slot, "POINTER": pointer, "OFFSET": real, "END": end}
+            entry = {
+                "SLOT": slot, "POINTER": pointer, "OFFSET": real, "END": end,
+                "SOURCE": "KD_OFF",
+            }
             try:
                 if kind == "LEAF":
-                    if header["ENTRY_FORMAT"] == "RAW":
-                        entry["RAW"] = hexlify(self.block_data[real:end])
-                        self.index_entries.append(entry)
-                        continue
-                    if real + 2 + header["DSZ"] > end:
-                        raise ValueError("truncated leaf entry")
-                    entry["FLAG"] = self.block_data[real]
-                    entry["LOCK"] = self.block_data[real + 1]
-                    column_start = real + 2
-                    if header["DSZ"]:
-                        entry["DATA"] = self.block_data[column_start:column_start + header["DSZ"]]
-                        if header["DSZ"] >= 6:
-                            entry["ROWID"] = self.decode_rowid(entry["DATA"][:6])
-                        if header["DSZ"] > 6:
-                            entry["DATA_SUFFIX"] = hexlify(entry["DATA"][6:])
-                        column_start += header["DSZ"]
-
-                    parsed_columns, entry["DATA_END"] = self._parse_columns(
-                        column_start, header["NCOLS"], end)
-                    entry["PARSED_NCOLS"] = len(parsed_columns)
-                    entry["COL_DATA"] = parsed_columns
-                    if header["DSZ"] == 0 and parsed_columns and parsed_columns[-1][0] == 6:
-                        rowid_column = parsed_columns[-1]
-                        entry["ROWID"] = self.decode_rowid(unhexlify(rowid_column[2]))
-                        entry["ROWID_COLUMN"] = rowid_column
-                        entry["COL_DATA"] = parsed_columns[:-1]
+                    self._decode_index_leaf_entry(entry, header, end)
                 else:
                     if real + 4 > end:
                         raise ValueError("truncated branch entry")
@@ -458,10 +467,53 @@ class Rico(object):
                 entry["PARSE_ERROR"] = str(error)
             self.index_entries.append(entry)
 
+        implicit_entries = []
+        if kind == "LEAF" and header["ENTRY_FORMAT"] == "BTREE_LEAF":
+            explicit_offsets = [
+                entry["OFFSET"] for entry in self.index_entries
+                if entry.get("SOURCE") == "KD_OFF"
+            ]
+            first_explicit = min(explicit_offsets) if explicit_offsets else header["ROWDATA_END"]
+            implicit_pos = header["ROWDATA_START"] + 4
+            while implicit_pos < first_explicit:
+                entry = {
+                    "SLOT": None, "POINTER": None, "OFFSET": implicit_pos,
+                    "END": first_explicit, "SOURCE": "FEO_GAP",
+                }
+                try:
+                    self._decode_index_leaf_entry(entry, header, first_explicit)
+                    if entry.get("DATA_END", implicit_pos) <= implicit_pos:
+                        raise ValueError("implicit leaf entry has zero length")
+                    rowid = entry.get("ROWID")
+                    if not rowid or rowid["FILE_ID"] not in self.file_names:
+                        raise ValueError("implicit leaf entry does not contain a valid physical ROWID")
+                    if entry.get("PARSED_NCOLS", 0) != header["NCOLS"]:
+                        raise ValueError("implicit leaf entry has an unexpected column count")
+                except (ValueError, IndexError) as error:
+                    entry["PARSE_ERROR"] = str(error)
+                    implicit_entries.append(entry)
+                    break
+                implicit_entries.append(entry)
+                implicit_pos = entry["DATA_END"]
+            if implicit_entries and not implicit_entries[-1].get("PARSE_ERROR") and implicit_pos != first_explicit:
+                implicit_entries[-1]["PARSE_ERROR"] = "implicit leaf entries do not reach the first kd_off record"
+
+        self.index_entries.extend(implicit_entries)
+        if kind == "LEAF":
+            explicit_logical = sorted(
+                [entry for entry in self.index_entries if entry.get("SOURCE") == "KD_OFF"],
+                key=lambda item: item["SLOT"])
+            implicit_logical = sorted(implicit_entries, key=lambda item: item["OFFSET"], reverse=True)
+            self.index_logical_entries = explicit_logical + implicit_logical
+        else:
+            self.index_logical_entries = list(self.index_entries)
+        for logical_slot, entry in enumerate(self.index_logical_entries):
+            entry["LOGICAL_SLOT"] = logical_slot
+
         self.index_header = header
         self.current_block_desc["INDEX_KIND"] = kind
         self.current_block_desc["INDEX_LEVEL"] = header["LEVEL"]
-        self.current_block_desc["INDEX_ROWS"] = len(self.index_entries)
+        self.current_block_desc["INDEX_ROWS"] = len(self.index_logical_entries)
 
     def get_row_details(self):
         num_of_itls = self.current_block_desc["ITLS"]
@@ -782,6 +834,7 @@ class Rico(object):
         self.index_header = None
         self.index_offsets = []
         self.index_entries = []
+        self.index_logical_entries = []
         self.min_rowdata = -1
         self.max_rowdata = -1
         self.current_rowp = 0
@@ -937,22 +990,23 @@ class Rico(object):
                 number, item[0], item[1], item[2]))
         print("")
 
-    def p_index_entry(self, slot):
-        if not self.index_header:
-            raise RuntimeError("The selected block is not an index data block")
-        if slot < 0 or slot >= len(self.index_offsets):
-            raise ValueError("kd_off[{0}] is outside the index offset table".format(slot))
-        matches = [entry for entry in self.index_entries if entry["SLOT"] == slot]
-        if not matches:
-            pointer = self.index_offsets[slot][1]
-            real = self.index_offsets[slot][2]
-            if pointer < 0:
-                raise ValueError("kd_off[{0}] is a negative sentinel ({1})".format(slot, pointer))
-            raise ValueError(
-                "kd_off[{0}] points to pad or outside decoded rowdata at offset {1}".format(slot, real))
-        entry = matches[0]
+    def p_index_entries(self):
+        if not self.index_header or self.index_header["KIND"] != "LEAF":
+            raise RuntimeError("Logical index entries are available only for index leaf blocks")
+        for entry in self.index_logical_entries:
+            if entry.get("SOURCE") == "KD_OFF":
+                source = "kd_off[{0}]".format(entry["SLOT"])
+            else:
+                source = "FEO gap"
+            print("index_entry[{0}]\t\t@{1}\t{2}".format(
+                entry["LOGICAL_SLOT"], entry["OFFSET"], source))
+        print("")
+
+    def _print_index_entry_data(self, entry, label):
         self.current_offset = entry["OFFSET"]
-        print("index entry kd_off[{0}]\t\t@{1}".format(slot, entry["OFFSET"]))
+        print("{0}\t\t@{1}".format(label, entry["OFFSET"]))
+        if entry.get("SOURCE") == "FEO_GAP":
+            print("source=FEO gap (no direct kd_off pointer)")
         if entry.get("PARSE_ERROR"):
             print("parse error: " + entry["PARSE_ERROR"])
             return
@@ -975,6 +1029,33 @@ class Rico(object):
             print("col{0:>5s}[{1:6s} @{2}: {3}".format(
                 str(number), str(column[0]) + "]", column[1], column[2]))
         print("")
+
+    def p_index_entry(self, slot):
+        if not self.index_header:
+            raise RuntimeError("The selected block is not an index data block")
+        if slot < 0 or slot >= len(self.index_offsets):
+            raise ValueError("kd_off[{0}] is outside the index offset table".format(slot))
+        matches = [entry for entry in self.index_entries if entry["SLOT"] == slot]
+        if not matches:
+            pointer = self.index_offsets[slot][1]
+            real = self.index_offsets[slot][2]
+            if pointer < 0:
+                raise ValueError(
+                    "kd_off[{0}] is a negative sentinel ({1}); use PRINT index_entries for logical records".format(
+                        slot, pointer))
+            raise ValueError(
+                "kd_off[{0}] points to pad or outside decoded rowdata at offset {1}; "
+                "use PRINT index_entries for logical records".format(slot, real))
+        entry = matches[0]
+        self._print_index_entry_data(entry, "index entry kd_off[{0}]".format(slot))
+
+    def p_logical_index_entry(self, logical_slot):
+        if not self.index_header or self.index_header["KIND"] != "LEAF":
+            raise RuntimeError("Logical index entries are available only for index leaf blocks")
+        if logical_slot < 0 or logical_slot >= len(self.index_logical_entries):
+            raise ValueError("index_entry[{0}] is outside the logical index entry list".format(logical_slot))
+        entry = self.index_logical_entries[logical_slot]
+        self._print_index_entry_data(entry, "logical index_entry[{0}]".format(logical_slot))
 
     def p_tailchk(self):
         tailchk_off = self.block_size-4
@@ -1122,9 +1203,12 @@ class Rico(object):
             "kdxle": self.p_kdx,
             "kdxbr": self.p_kdx,
             "kd_off": self.p_kd_off,
+            "index_entries": self.p_index_entries,
             "tailchk": self.p_tailchk,
         }
-        if name.startswith("*kd_off["):
+        if name.startswith("*index_entry["):
+            self.p_logical_index_entry(int(name.split("[")[1][:-1]))
+        elif name.startswith("*kd_off["):
             self.p_index_entry(int(name.split("[")[1][:-1]))
         elif name.startswith("kd_off["):
             self.p_kd_off(int(name.split("[")[1][:-1]))
@@ -1521,7 +1605,7 @@ COMMAND_HELP = """BBED-compatible commands:
   DUMP [/V] [DBA file,block] [OFFSET offset] [COUNT count]
   MAP
   PRINT [kcbh|ktbbh|kdbh|kdbt|kdbr|kdbr[n]|*kdbr[n]|kdxle|kdxbr]
-  PRINT [kd_off|kd_off[n]|*kd_off[n]|tailchk]
+  PRINT [kd_off|kd_off[n]|*kd_off[n]|index_entries|*index_entry[n]|tailchk]
   EXAMINE /X|/C|/D|/U|/O|/r<types> [OFFSET offset] [COUNT count]
   FIND /X hex | FIND /C string
   COPY TO DBA file,block | COPY FILE file BLOCK block
