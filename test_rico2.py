@@ -6,7 +6,7 @@ import tempfile
 import unittest
 from unittest import mock
 
-from rico2 import Rico, execute_command
+from rico2 import OracleType, Rico, execute_command
 
 
 class RicoCommandTests(unittest.TestCase):
@@ -69,6 +69,40 @@ class RicoCommandTests(unittest.TestCase):
         self.assertIn("5249434f", dump_output)
         _, examine_output = self.run_command("examine /c offset 32 count 16")
         self.assertIn("RICO2-TEST-BLOCK", examine_output)
+
+    def test_oracle_type_inference_is_conservative(self):
+        self.assertEqual(("TEXT", "Abel"), OracleType.infer("4162656c"))
+        self.assertEqual(("NUMBER", "174"), OracleType.infer("c2024b"))
+        self.assertEqual(("NUMBER", "-1"), OracleType.infer("3e6466"))
+        self.assertEqual(("NUMBER", "0"), OracleType.infer("80"))
+        self.assertEqual(
+            ("DATE", "2004-05-11 00:00:00"),
+            OracleType.infer("7868050b010101"))
+        self.assertIsNone(OracleType.infer("0001ff"))
+        self.assertIsNone(OracleType.infer("78680d0b010101"))
+
+    def test_printed_columns_are_inferred_and_examine_r_needs_no_types(self):
+        self.rico.current_block_desc.update({"BLOCK_TYPE": 6, "BLOCK_SUBTYPE": 1})
+        self.rico.min_rowdata = 100
+        self.rico.kdbr_data = [{
+            "OFFSET": 100, "FLAG": 0x2c, "LOCK": 0, "NCOLS": 4,
+            "COL_DATA": [
+                [3, 103, "c2024b"],
+                [5, 107, "456c6c656e"],
+                [7, 113, "7868050b010101"],
+                [3, 121, "0001ff"],
+            ],
+        }]
+
+        _, output = self.run_command("print *kdbr[0]")
+        self.assertIn("174 [NUMBER?]", output)
+        self.assertIn("Ellen [TEXT?]", output)
+        self.assertIn("2004-05-11 00:00:00 [DATE?]", output)
+        self.assertIn("0001ff", output)
+        self.assertNotIn("0001ff ", output)
+
+        _, output = self.run_command("examine /r")
+        self.assertIn("174 [NUMBER?]", output)
 
     def test_modify_and_undo_are_in_memory(self):
         self.run_command("set offset 32")

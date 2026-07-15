@@ -25,6 +25,7 @@ import shlex
 import sys
 from binascii import hexlify as _hexlify
 from binascii import unhexlify as _unhexlify
+from datetime import datetime
 from decimal import Decimal
 
 
@@ -47,6 +48,8 @@ def text_to_bytes(data):
 
 
 class OracleType(object):
+    TYPE_NAMES = {'c': 'TEXT', 'n': 'NUMBER', 't': 'DATE'}
+
     def __init__(self, data_hex, type_name = None):
         self.value_string = None
         self.ubyte = Struct("B")
@@ -66,16 +69,13 @@ class OracleType(object):
 
     def decode_date(self, data_hex):
         data_hex_b = unhexlify(data_hex)
-        century = "{0:02d}".format(data_hex_b[0] - 100)
-        year = "{0:02d}".format(data_hex_b[1] - 100)
-        month = "{0:02d}".format(data_hex_b[2])
-        day = "{0:02d}".format(data_hex_b[3])
-        hour = "{0:02d}".format(data_hex_b[4] - 1)
-        minute = "{0:02d}".format(data_hex_b[5] - 1)
-        second = "{0:02d}".format(data_hex_b[6] - 1)
-
-        date_string = century + year + "-" + month + "-" + day + ":" + hour + ":" + minute + ":" + second
-        return date_string
+        if len(data_hex_b) != 7:
+            raise ValueError("An Oracle DATE must contain 7 bytes")
+        year = (data_hex_b[0] - 100) * 100 + data_hex_b[1] - 100
+        value = datetime(year, data_hex_b[2], data_hex_b[3],
+                         data_hex_b[4] - 1, data_hex_b[5] - 1,
+                         data_hex_b[6] - 1)
+        return value.strftime("%Y-%m-%d %H:%M:%S")
 
     def decode_string(self, data_hex, characterset=None):
         return unhexlify(data_hex).decode(characterset or "latin-1")
@@ -83,9 +83,9 @@ class OracleType(object):
     def decode_number(self, data_hex):
         data_hex_b = unhexlify(data_hex)
         if data_hex == "80":
-            return 0
+            return "0"
 
-        if data_hex_b[-1] != 102:
+        if data_hex_b[0] > 128:
             exPot = data_hex_b[0] - 193
             numberValue = "0."
             exPot = exPot * 2 + 2
@@ -97,12 +97,76 @@ class OracleType(object):
             numberValue = "-0."
             exPot = exPot * 2 + 2
 
-            for value in data_hex_b[1:-1]:
+            mantissa = data_hex_b[1:-1] if data_hex_b[-1] == 102 else data_hex_b[1:]
+            for value in mantissa:
                 numberValue += "{0:02d}".format(101 - value)
 
         fVal = Decimal(numberValue)
         powVal = Decimal(10) ** Decimal(exPot)
-        return str(fVal * powVal).rstrip("0").rstrip(".")
+        result = format(fVal * powVal, "f")
+        if "." in result:
+            result = result.rstrip("0").rstrip(".")
+        return result
+
+    @staticmethod
+    def _looks_like_number(data):
+        if data == b"\x80":
+            return True
+        if len(data) < 2 or len(data) > 21:
+            return False
+        if data[0] > 128:
+            mantissa = data[1:]
+            return (all(1 <= value <= 100 for value in mantissa) and
+                    mantissa[-1] != 1)
+        if data[0] < 128:
+            if data[-1] == 102:
+                mantissa = data[1:-1]
+            elif len(data) == 21:
+                mantissa = data[1:]
+            else:
+                return False
+            return (bool(mantissa) and
+                    all(2 <= value <= 101 for value in mantissa) and
+                    mantissa[-1] != 101)
+        return False
+
+    @classmethod
+    def infer(cls, data_hex):
+        """Return (type name, decoded value) for a high-confidence guess."""
+        if data_hex == "*NULL*":
+            return "NULL", "*NULL*"
+        try:
+            data = unhexlify(data_hex)
+        except (TypeError, ValueError):
+            return None
+
+        # DATE has a rigid seven-byte layout. Validate every component to
+        # avoid treating arbitrary seven-byte values as dates.
+        if len(data) == 7:
+            try:
+                return cls.TYPE_NAMES['t'], cls(data_hex, 't').value_string
+            except (ValueError, IndexError):
+                pass
+
+        # NUMBER has strict mantissa ranges and a canonical negative
+        # terminator. Check it before text so values such as -1 (3e6466),
+        # whose bytes happen to be printable ASCII, are still decoded.
+        if cls._looks_like_number(data):
+            try:
+                return cls.TYPE_NAMES['n'], cls(data_hex, 'n').value_string
+            except (ValueError, IndexError, ArithmeticError):
+                pass
+
+        for characterset in ("utf-8", "latin-1"):
+            try:
+                value = data.decode(characterset)
+            except UnicodeDecodeError:
+                continue
+            if value and value.isprintable():
+                return cls.TYPE_NAMES['c'], value
+            if characterset == "latin-1":
+                break
+        return None
 
 
 class Rico(object):
@@ -1114,16 +1178,36 @@ class Rico(object):
             print("child dba={0} [file: {1} block: {2}]".format(
                 hex(entry["CHILD_DBA"]), entry["CHILD_FILE"], entry["CHILD_BLOCK"]))
         for number, column in enumerate(entry.get("COL_DATA", [])):
-            print("col{0:>5s}[{1:6s} @{2}: {3}".format(
-                str(number), str(column[0]) + "]", column[1], column[2]))
+            self._print_column("col", number, column)
         if entry.get("IOT_ROW"):
             iot_row = entry["IOT_ROW"]
             print("iot row flag={0} lock={1} ncols={2}".format(
                 hex(iot_row["FLAG"]), hex(iot_row["LOCK"]), iot_row["NCOLS"]))
             for number, column in enumerate(iot_row.get("COL_DATA", [])):
-                print("iotcol{0:>2s}[{1:6s} @{2}: {3}".format(
-                    str(number), str(column[0]) + "]", column[1], column[2]))
+                self._print_column("iotcol", number, column)
         print("")
+
+    @staticmethod
+    def _column_value(data_hex, type_code=None):
+        if data_hex == "*NULL*":
+            return None
+        if type_code:
+            return str(OracleType(data_hex, type_code).value_string)
+        inferred = OracleType.infer(data_hex)
+        if inferred is None:
+            return None
+        type_name, value = inferred
+        return "{0} [{1}?]".format(value, type_name)
+
+    def _print_column(self, prefix, number, column, type_code=None):
+        value = self._column_value(column[2], type_code)
+        raw = column[2]
+        if value is None:
+            print("{0}{1:>5s}[{2:6s} @{3}: {4}".format(
+                prefix, str(number), str(column[0]) + "]", column[1], raw))
+        else:
+            print("{0}{1:>5s}[{2:6s} @{3}: {4:40s} {5}".format(
+                prefix, str(number), str(column[0]) + "]", column[1], raw, value))
 
     def p_index_entry(self, slot):
         if not self.index_header:
@@ -1255,34 +1339,20 @@ class Rico(object):
         print("\n")
 
         for i in range(row["NCOLS"]):
-            if types is None:
-                print("col{0:>5s}[{1:6s} {2}:  {3}".format(str(i), str(row["COL_DATA"][i][0]) + "]",
-                                                           "@" + str(row["COL_DATA"][i][1]),
-                                                           row["COL_DATA"][i][2]))
-            else:
-                if len(types) > i and row["COL_DATA"][i][2] != "*NULL*":
-                    ot = OracleType(row["COL_DATA"][i][2], types[i])
-                    value_string = ot.value_string
-                else:
-                    value_string = " "
-
-                print("col{0:>5s}[{1:6s} {2}:  {3:40s} {4}".format(str(i),
-                                                                   str(row["COL_DATA"][i][0]) + "]",
-                                                                   "@" + str(row["COL_DATA"][i][1]),
-                                                                   row["COL_DATA"][i][2],
-                                                                   value_string))
+            type_code = types[i] if types and len(types) > i else None
+            self._print_column("col", i, row["COL_DATA"][i], type_code)
 
         print("\n")
 
     def examine(self, pattern):
         if pattern[0:2] == "/r":
-            self.p_kdbr_data(self.current_rowp, pattern[2:])
+            self.p_kdbr_data(self.current_rowp, pattern[2:] or None)
             return
 
         self.require_block()
         mode = pattern.lower()
         if mode not in ("/x", "/c", "/d", "/u", "/o"):
-            raise ValueError("EXAMINE format must be /x, /c, /d, /u, /o or /r<types>")
+            raise ValueError("EXAMINE format must be /x, /c, /d, /u, /o, /r or /r<types>")
         data = self.block_data[self.current_offset:min(self.current_offset + self.count, self.block_size)]
         print(" File: {0} ({1}) Block: {2} Offset: {3}".format(
             self.current_block_desc["FILE_NAME"], self.current_block_desc["FILE_ID"],
@@ -1725,7 +1795,7 @@ COMMAND_HELP = """BBED-compatible commands:
   MAP
   PRINT [kcbh|ktbbh|kdbh|kdbt|kdbr|kdbr[n]|*kdbr[n]|kdxle|kdxbr]
   PRINT [kd_off|kd_off[n]|*kd_off[n]|index_entries|*index_entry[n]|tailchk]
-  EXAMINE /X|/C|/D|/U|/O|/r<types> [OFFSET offset] [COUNT count]
+  EXAMINE /X|/C|/D|/U|/O|/r[types] [OFFSET offset] [COUNT count]
   FIND /X hex | FIND /C string
   COPY TO DBA file,block | COPY FILE file BLOCK block
   MODIFY -H hex | MODIFY -S string

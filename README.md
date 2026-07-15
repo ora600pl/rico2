@@ -419,7 +419,7 @@ col 1[2] @8066: c102
 col 2: *NULL*
 ```
 
-The output contains the row flag, ITL slot in `lock`, column count, and raw hexadecimal column values. `*NULL*` represents a NULL column. Logical values can then be decoded with `EXAMINE /r...`.
+The output contains the row flag, ITL slot in `lock`, column count, and raw hexadecimal column values. `*NULL*` represents a NULL column. RICO2 also makes a conservative per-value guess for printable text, Oracle `NUMBER`, and a valid seven-byte Oracle `DATE`. Guessed values are marked with a question mark, for example `Abel [TEXT?]`; unrecognized values remain raw hexadecimal. Explicit types supplied to `EXAMINE /r...` take precedence over the heuristic.
 
 Example cluster key:
 
@@ -535,7 +535,7 @@ special index entry format; semantic decoding is not available
 Interprets bytes beginning at the current or supplied offset.
 
 ```text
-EXAMINE /X|/C|/D|/U|/O|/r<types> [DBA f,b | FILE f BLOCK b]
+EXAMINE /X|/C|/D|/U|/O|/r[types] [DBA f,b | FILE f BLOCK b]
         [OFFSET n] [COUNT n]
 X       /X|/C|/D|/U|/O|/r<types> [...]
 ```
@@ -549,7 +549,8 @@ Formats:
 | `/D` | signed decimal bytes from `-128` through `127` |
 | `/U` | unsigned decimal bytes from `0` through `255` |
 | `/O` | octal byte values |
-| `/r<types>` | columns of the most recently decoded row |
+| `/r` | columns of the most recently decoded row with inferred values |
+| `/r<types>` | columns of the most recently decoded row with explicit types |
 
 Examples:
 
@@ -561,7 +562,7 @@ rico2 > x /u offset 0 count 4
 11 162 0 0
 ```
 
-Record format `/r` operates on the row selected by `PRINT *kdbr[n]`. Each character describes one column:
+Record format `/r` operates on the row selected by `PRINT *kdbr[n]`. Without a type suffix it uses the same conservative heuristic as `PRINT`. When types are supplied, each character describes one column:
 
 | Character | Oracle type |
 |---|---|
@@ -902,14 +903,14 @@ RICO2 validates that offset tables, free space, row data, and entry boundaries r
 
 ### Oracle values
 
-Raw column bytes are displayed in hexadecimal. Record-mode `EXAMINE` provides decoders for:
+Raw column bytes are always displayed in hexadecimal. `PRINT` and bare `EXAMINE /r` heuristically append a value when the bytes form unambiguous printable text, Oracle `NUMBER`, or a valid seven-byte `DATE`. The `?` in labels such as `[NUMBER?]` makes clear that no data dictionary was consulted. Record-mode `EXAMINE` also accepts explicit decoders for:
 
 - character data through type `c`;
 - Oracle internal `NUMBER` through type `n`;
 - Oracle internal seven-byte `DATE` through type `t`;
 - NULL markers represented as `*NULL*`.
 
-RICO2 does not infer a table definition from the data dictionary. The operator must supply the expected column types and understand the segment being inspected.
+RICO2 does not infer a table definition from the data dictionary. The heuristic is best-effort and leaves unknown binary values untouched; use `/r<types>` whenever the expected definition is known.
 
 ### DBA and ROWID output
 
