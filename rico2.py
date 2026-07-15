@@ -1138,6 +1138,24 @@ class Rico(object):
                 raise ValueError(
                     "kd_off[{0}] is a negative sentinel ({1}); use PRINT index_entries for logical records".format(
                         slot, pointer))
+
+            # BBED dereferences every non-negative kd_off value, even when it
+            # is one of the two directory-control values rather than an index
+            # record.  The upper-boundary value normally lands in the pad near
+            # the block tail, while a zero value points back to the kdx header.
+            # Preserve those physical semantics for PRINT *kd_off[n]; logical
+            # records remain available through PRINT *index_entry[n].
+            if real == self.index_header["OFFSET"]:
+                self.current_offset = real
+                self.p_kdx()
+                return
+            if (self.index_header["ROWDATA_END"] <= real < self.block_size - 4):
+                self.current_offset = real
+                print("pad")
+                print("---")
+                print("ub1 pad\t\t\t\t\t@{0}\t{1}\n".format(
+                    real, hex(self.block_data[real])))
+                return
             raise ValueError(
                 "kd_off[{0}] points to pad or outside decoded rowdata at offset {1}; "
                 "use PRINT index_entries for logical records".format(slot, real))

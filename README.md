@@ -470,7 +470,7 @@ Requesting an incompatible structure produces a diagnostic error instead of inte
 
 The physical start of `kdxle` or `kdxbr` is not always immediately after the ITL array. RICO2 interprets the `ktbbhflg` extension flags and any variable extension length in the same way as BBED. Consequently, blocks with the same reported `ktbbh` size may place the index header at different offsets, for example `@92` or `@100`.
 
-`kd_off` elements are signed 16-bit values. Initial directory slots may be metadata pointers, pad pointers, zero values, or negative sentinels rather than index records. Therefore, `kd_off[0]` is not guaranteed to be the first decodable entry. Use `PRINT kd_off` to inspect the physical directory. Use `PRINT index_entries` and `PRINT *index_entry[n]` when the goal is to inspect records in logical key order.
+`kd_off` elements are signed 16-bit values. Initial directory slots may be metadata pointers, pad pointers, zero values, or negative sentinels rather than index records. Therefore, `kd_off[0]` is not guaranteed to be the first decodable entry. `PRINT *kd_off[n]` follows BBED's physical-pointer semantics: a pad pointer prints the addressed `pad`, a zero pointer prints the index header at the base offset, and a negative sentinel cannot be dereferenced. Use `PRINT kd_off` to inspect the physical directory. Use `PRINT index_entries` and `PRINT *index_entry[n]` when the goal is to inspect records in logical key order.
 
 Leaf records are physically packed between `kdxcofeo` and the upper row-data boundary, but not every live record is necessarily referenced by a usable physical `kd_off` element. Such records can occur before or between referenced records. RICO2 walks the complete packed region, excludes purged records, reconstructs logical key order, and marks records without a direct pointer as `source=FEO gap`. The physical `kd_off` values remain visible exactly as stored, including pad, zero, metadata, and negative sentinel values.
 
@@ -1080,7 +1080,7 @@ Interactive command failures are printed with a `Command failed:` prefix. Common
 | `DIRTY Yes` | the buffer differs from its snapshot; use `UNDO` or intentionally `SAVE` |
 | `Verification failed` | DBA, checksum, boundaries, offsets, or decoded structures are inconsistent |
 | special index entry format | only `raw=...` is available; semantic decoding is not implemented |
-| `kd_off[n]` points to pad or is a negative sentinel | the directory slot is metadata, not an index record; use `PRINT index_entries` and `PRINT *index_entry[n]` for logical leaf records |
+| `kd_off[n]` prints `pad`, the index header, or reports a negative sentinel | the directory slot is metadata, not an index record; this is the same physical dereference behavior as BBED; use `PRINT index_entries` and `PRINT *index_entry[n]` for logical leaf records |
 
 If output appears incorrect:
 

@@ -176,12 +176,34 @@ class RicoCommandTests(unittest.TestCase):
         _, output = self.run_command("print *index_entry[2]")
         self.assertIn("source=FEO gap", output)
         self.assertIn("c20307", output)
-        with self.assertRaisesRegex(ValueError, "points to pad"):
-            self.run_command("print *kd_off[0]")
+        _, output = self.run_command("print *kd_off[0]")
+        self.assertIn("pad", output)
+        self.assertIn("@244", output)
+        self.assertIn("0x0", output)
         with self.assertRaisesRegex(ValueError, "negative sentinel"):
             self.run_command("print *kd_off[1]")
         _, output = self.run_command("verify")
         self.assertIn("Verification passed", output)
+
+    def test_zero_index_directory_pointer_dereferences_kdx_header(self):
+        block = bytearray(self.block_size)
+        block[0] = 6
+        block[4:8] = struct.pack("I", 4194305)
+        block[20] = 2
+        block[36] = 2
+        base = 92
+        block[base:base + 32] = struct.pack(
+            "<BBBBIhhhhhhIIBB2x", 0, 0, 0x80, 1, 0, 2, 40, 100, 58,
+            0, 0, 0, 0, 6, 0)
+        block[124:128] = struct.pack("<hh", 120, 0)
+        rowid = (4194314).to_bytes(4, "big") + (2).to_bytes(2, "big")
+        block[192:203] = b"\x00\x00" + rowid + b"\x02\xc1\x02"
+        self.load_synthetic_block(block)
+
+        _, output = self.run_command("print *kd_off[1]")
+        self.assertIn("struct kdxle", output)
+        self.assertIn("@92", output)
+        self.assertIn("kdxconro", output)
 
     def test_index_leaf_with_rowid_encoded_as_last_column(self):
         block = bytearray(self.block_size)
