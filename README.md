@@ -472,9 +472,20 @@ The physical start of `kdxle` or `kdxbr` is not always immediately after the ITL
 
 `kd_off` elements are signed 16-bit values. Initial directory slots may be metadata pointers, pad pointers, zero values, or negative sentinels rather than index records. Therefore, `kd_off[0]` is not guaranteed to be the first decodable entry. Use `PRINT kd_off` to inspect the physical directory. Use `PRINT index_entries` and `PRINT *index_entry[n]` when the goal is to inspect records in logical key order.
 
-Some leaf blocks contain committed records between `kdxcofeo` and the first row referenced by an ordinary `kd_off` element. RICO2 parses this FEO gap sequentially, marks its records as `source=FEO gap`, and appends them to the logical entry list in key order. The physical `kd_off[0]` and `kd_off[1]` values remain visible as pad or sentinel values, matching BBED, while the logical commands expose every decoded record.
+Leaf records are physically packed between `kdxcofeo` and the upper row-data boundary, but not every live record is necessarily referenced by a usable physical `kd_off` element. Such records can occur before or between referenced records. RICO2 walks the complete packed region, excludes purged records, reconstructs logical key order, and marks records without a direct pointer as `source=FEO gap`. The physical `kd_off` values remain visible exactly as stored, including pad, zero, metadata, and negative sentinel values.
 
-Leaf entry layout also depends on `kdxledsz`. With `DSZ=6`, a six-byte physical ROWID precedes the key columns. With `DSZ=8`, the entry contains a six-byte ROWID plus a two-byte data suffix before the key. With `DSZ=0`, the ROWID is normally encoded as the final six-byte item in the `kdxconco` column list, as used by non-unique indexes. RICO2 handles all three layouts and reports the ROWID separately from the logical key columns.
+Leaf entry layout also depends on `kdxledsz`. With `DSZ=6`, a six-byte physical ROWID precedes the key columns. With `DSZ=8`, the entry contains a six-byte ROWID plus a two-byte data suffix before the key. With `DSZ=0`, the ROWID is normally encoded as the final six-byte item in the `kdxconco` column list, as used by non-unique indexes. An `IOT - TOP` leaf also uses `DSZ=0`, but stores an embedded table row after the key. RICO2 decodes that payload as `iot row` and `iotcol` fields.
+
+Example IOT top entry:
+
+```text
+logical index_entry[0] @8115
+flag=0x4 lock=0x2
+col 0[2] @8117: 4954
+iot row flag=0x2c lock=0x0 ncols=2
+iotcol 0[5] @8123: 4974616c79
+iotcol 1[2] @8129: c102
+```
 
 Example leaf entry:
 
@@ -736,7 +747,7 @@ VERIFY FILE <file> BLOCK <block>
 Checks include:
 
 - in-memory block length;
-- agreement between the selected DBA and the DBA in `kcbh`;
+- agreement between the selected block number and the DBA in `kcbh`; for PDB files, `kcbh` may contain a relative file number while the listfile uses the absolute CDB file number;
 - checksum correctness when the block flags require checksum validation;
 - `kdbr`, row offset, and record boundaries for table and cluster blocks;
 - `kd_off`, entry, and column boundaries for leaf and branch index blocks;

@@ -209,6 +209,63 @@ class RicoCommandTests(unittest.TestCase):
         _, output = self.run_command("verify")
         self.assertIn("Verification passed", output)
 
+    def test_index_leaf_walks_all_packed_gaps(self):
+        block = bytearray(self.block_size)
+        block[0] = 6
+        block[4:8] = struct.pack("I", 4194305)
+        block[20] = 2
+        block[36] = 2
+        base = 92
+        block[base:base + 32] = struct.pack(
+            "<BBBBIhhhhhhIIBB2x", 0, 0, 0x80, 1, 0, 3, 38, 96, 58,
+            0, 0, 0, 0, 6, 0)
+        # The first item is the packed-row upper boundary, the second is a
+        # control value, and only the middle physical row has a kd_off entry.
+        block[124:130] = struct.pack("<hhh", 129, 0, 107)
+        rowid = (4194314).to_bytes(4, "big")
+        for offset, slot, key in ((188, 1, b"\xc1\x04"),
+                                  (199, 2, b"\xc1\x03"),
+                                  (210, 3, b"\xc1\x02")):
+            block[offset:offset + 11] = (
+                b"\x00\x00" + rowid + slot.to_bytes(2, "big") + b"\x02" + key)
+        self.load_synthetic_block(block)
+
+        self.assertEqual(3, len(self.rico.index_logical_entries))
+        self.assertEqual(["c102", "c103", "c104"], [
+            entry["COL_DATA"][0][2] for entry in self.rico.index_logical_entries])
+        self.assertEqual(2, len([
+            entry for entry in self.rico.index_logical_entries
+            if entry["SOURCE"] == "FEO_GAP"]))
+
+    def test_iot_top_leaf_decodes_embedded_rows(self):
+        block = bytearray(self.block_size)
+        block[0] = 6
+        block[4:8] = struct.pack("I", 4194305)
+        block[20] = 2
+        block[36] = 2
+        base = 92
+        block[base:base + 32] = struct.pack(
+            "<BBBBIhhhhhhIIBB2x", 0, 0, 0x80, 1, 0, 2, 40, 100, 58,
+            0, 0, 0, 0, 0, 0)
+        records = []
+        for key, name in ((b"BE", b"Belgium"), (b"AR", b"Argentina")):
+            records.append(
+                b"\x04\x02\x02" + key +
+                b"\x2c\x00\x02" + bytes((len(name),)) + name + b"\x02\xc1\x02")
+        start = 192
+        packed = b"".join(records)
+        block[start:start + len(packed)] = packed
+        block[124:128] = struct.pack("<hh", start + len(packed) - base, 0)
+        self.load_synthetic_block(block)
+
+        self.assertEqual(2, len(self.rico.index_logical_entries))
+        self.assertTrue(all(entry.get("IOT_ROW") for entry in self.rico.index_logical_entries))
+        self.assertEqual([2, 2], [
+            entry["IOT_ROW"]["NCOLS"] for entry in self.rico.index_logical_entries])
+        _, output = self.run_command("print *index_entry[0]")
+        self.assertIn("iot row flag=", output)
+        self.assertIn("iotcol", output)
+
     def test_index_branch_child_and_separator_key(self):
         block = bytearray(self.block_size)
         block[0] = 6
@@ -280,6 +337,32 @@ class RicoCommandTests(unittest.TestCase):
         _, output = self.run_command("print *kdbr[1]")
         self.assertIn("cluster key slots", output)
         _, output = self.run_command("verify")
+        self.assertIn("Verification passed", output)
+
+    def test_empty_cluster_block_uses_ktb_flags_for_kdbh_offset(self):
+        block = bytearray(self.block_size)
+        block[0] = 6
+        block[4:8] = struct.pack("I", 4194305)
+        block[20] = 1
+        block[36] = 2
+        block[38] = 3
+        # kdbh starts immediately after the two ITLs. Its leading zeroes used
+        # to be mistaken for a four-byte KTB extension.
+        block[92:106] = struct.pack("Bbhhhhhh", 0, 0, 0, -1, 14, 8096, 8082, 8082)
+        self.load_synthetic_block(block)
+
+        self.assertEqual(-8, self.rico.offset_mod)
+        self.assertEqual(0, self.rico.current_block_desc["NTAB"])
+        self.assertEqual(0, self.rico.current_block_desc["DECLARED_ROWS"])
+        _, output = self.run_command("map")
+        self.assertNotIn("[-", output)
+
+    def test_verify_accepts_pdb_relative_file_number(self):
+        block = bytearray(self.block_size)
+        block[4:8] = struct.pack("I", 2 * 4194304 + 1)
+        self.load_synthetic_block(block)
+        valid, output = self.run_command("verify")
+        self.assertTrue(valid)
         self.assertIn("Verification passed", output)
 
 

@@ -306,7 +306,8 @@ class Rico(object):
             "SLOT": slot,
         }
 
-    def _parse_columns(self, start, count, end=None, allow_trailing_marker=False):
+    def _parse_columns(self, start, count, end=None, allow_trailing_marker=False,
+                       stop_at_index_marker=False):
         end = self.block_size - 4 if end is None else min(end, self.block_size - 4)
         columns = []
         pos = start
@@ -316,6 +317,8 @@ class Rico(object):
             col_offset = pos
             col_len = self.block_data[pos]
             pos += 1
+            if col_len == 254 and stop_at_index_marker:
+                break
             if col_len == 255:
                 columns.append([0, col_offset, "*NULL*"])
                 continue
@@ -360,22 +363,103 @@ class Rico(object):
             entry["ROWID"] = self.decode_rowid(unhexlify(rowid_column[2]))
             entry["ROWID_COLUMN"] = rowid_column
             entry["COL_DATA"] = parsed_columns[:-1]
+
+        # An IOT top index stores the table row immediately after the key.
+        # The embedded row begins with a normal row flag/lock/ncols header.
+        if (header["DSZ"] == 0 and entry["FLAG"] & 0x04 and
+                entry["DATA_END"] + 3 <= end):
+            row_pos = entry["DATA_END"]
+            row_flag = self.block_data[row_pos]
+            if row_flag & self.row_header["head_piece"]:
+                row_lock = self.block_data[row_pos + 1]
+                ncols = self.block_data[row_pos + 2]
+                row_pos += 3
+                if ncols == 254:
+                    if row_pos + 2 > end:
+                        raise ValueError("truncated IOT row column count")
+                    ncols = self.ushort.unpack(self.block_data[row_pos:row_pos + 2])[0]
+                    row_pos += 2
+                iot_columns, row_pos = self._parse_columns(row_pos, ncols, end)
+                entry["IOT_ROW"] = {
+                    "FLAG": row_flag, "LOCK": row_lock, "NCOLS": ncols,
+                    "COL_DATA": iot_columns,
+                }
+                entry["DATA_END"] = row_pos
         return entry
 
-    def get_index_details(self):
+    def _ktb_payload_offset(self):
+        """Return the first byte after ktbbh, ITLs, and any KTB extension."""
         end_of_ktbbh = 20 + 24 + self.current_block_desc["ITLS"] * 24
-        ktbbh_flags = self.block_data[38]
+        flags = self.block_data[38]
         extension_size = 0
-        if ktbbh_flags & 0x30:
+        if flags & 0x30:
             extension_size = 8
-            if ktbbh_flags & 0x20:
+            if flags & 0x20:
                 variable_size_offset = end_of_ktbbh + 4
                 if variable_size_offset + 2 > self.block_size - 4:
-                    raise ValueError("KTB index header extension exceeds the block")
+                    raise ValueError("KTB header extension exceeds the block")
                 extension_size += self.ushort.unpack(
                     self.block_data[variable_size_offset:variable_size_offset + 2])[0]
+        return end_of_ktbbh + extension_size
 
-        base = end_of_ktbbh + extension_size
+    def _walk_packed_index_leaf(self, header):
+        """Decode every packed leaf record, including records without kd_off pointers."""
+        real_offsets = [
+            item[2] for item in self.index_offsets
+            if item[2] is not None and 0 <= item[2] < self.block_size - 4
+        ]
+        if not real_offsets or header["ENTRY_FORMAT"] != "BTREE_LEAF":
+            return None
+
+        packed_end = max(real_offsets)
+        pos = header["ROWDATA_START"] + 4
+        if not (0 <= pos < packed_end <= self.block_size - 4):
+            return None
+
+        slots_by_offset = {}
+        for slot, (_, _, real) in enumerate(self.index_offsets):
+            if real is not None:
+                slots_by_offset.setdefault(real, slot)
+
+        entries = []
+        while pos < packed_end:
+            entry = {
+                "SLOT": slots_by_offset.get(pos),
+                "POINTER": pos - header["OFFSET"],
+                "OFFSET": pos,
+                "END": packed_end,
+                "SOURCE": "KD_OFF" if pos in slots_by_offset else "FEO_GAP",
+            }
+            try:
+                self._decode_index_leaf_entry(entry, header, packed_end)
+            except (ValueError, IndexError):
+                return None
+
+            next_pos = entry.get("DATA_END", pos)
+            if next_pos <= pos or next_pos > packed_end:
+                return None
+
+            # Purged/deleted rows (flag 0x01 with no owning ITL) and control
+            # records occupy packed rowdata but are not counted by kdxconro.
+            is_nonlogical = (entry.get("FLAG") == 0xff or
+                             (entry.get("FLAG") == 0x01 and entry.get("LOCK") == 0))
+            if not is_nonlogical:
+                rowid = entry.get("ROWID")
+                if header["DSZ"] >= 6:
+                    if not rowid or rowid["FILE_ID"] not in self.file_names:
+                        return None
+                elif not entry.get("IOT_ROW"):
+                    if not rowid or rowid["FILE_ID"] not in self.file_names:
+                        return None
+                entries.append(entry)
+            pos = next_pos
+
+        if pos != packed_end or len(entries) != header["NROWS"]:
+            return None
+        return entries
+
+    def get_index_details(self):
+        base = self._ktb_payload_offset()
         if base + self.struct_kdxbr.size > self.block_size - 4:
             raise ValueError("Index header exceeds the block")
         level = self.block_data[base]
@@ -462,7 +546,8 @@ class Rico(object):
                     entry["CHILD_FILE"] = child_file
                     entry["CHILD_BLOCK"] = child_dba % self.max_block
                     entry["COL_DATA"], entry["DATA_END"] = self._parse_columns(
-                        real + 4, header["NCOLS"], end, allow_trailing_marker=True)
+                        real + 4, header["NCOLS"], end, allow_trailing_marker=True,
+                        stop_at_index_marker=True)
             except (ValueError, IndexError) as error:
                 entry["PARSE_ERROR"] = str(error)
             self.index_entries.append(entry)
@@ -500,11 +585,16 @@ class Rico(object):
 
         self.index_entries.extend(implicit_entries)
         if kind == "LEAF":
-            explicit_logical = sorted(
-                [entry for entry in self.index_entries if entry.get("SOURCE") == "KD_OFF"],
-                key=lambda item: item["SLOT"])
-            implicit_logical = sorted(implicit_entries, key=lambda item: item["OFFSET"], reverse=True)
-            self.index_logical_entries = explicit_logical + implicit_logical
+            packed_entries = self._walk_packed_index_leaf(header)
+            if packed_entries is not None:
+                self.index_entries = packed_entries
+                self.index_logical_entries = list(reversed(packed_entries))
+            else:
+                explicit_logical = sorted(
+                    [entry for entry in self.index_entries if entry.get("SOURCE") == "KD_OFF"],
+                    key=lambda item: item["SLOT"])
+                implicit_logical = sorted(implicit_entries, key=lambda item: item["OFFSET"], reverse=True)
+                self.index_logical_entries = explicit_logical + implicit_logical
         else:
             self.index_logical_entries = list(self.index_entries)
         for logical_slot, entry in enumerate(self.index_logical_entries):
@@ -846,15 +936,11 @@ class Rico(object):
         if block_type == 6:
             self.current_block_desc["ITLS"] = \
                 self.ubyte.unpack(self.block_data[self.ktbbhictOffset:self.ktbbhictOffset + 1])[0]
-
             end_of_ktbbh = 20 + 24 + self.current_block_desc["ITLS"] * 24
-            mod_flags = self.uint2.unpack(self.block_data[end_of_ktbbh:end_of_ktbbh+8])
-            if mod_flags[0] == 0 and mod_flags[1] == 0:
-                self.offset_mod = 0
-            elif mod_flags[0] == 0 and mod_flags[1] > 0:
-                self.offset_mod = -4
-            elif mod_flags[0] > 0 and mod_flags[1] > 0:
-                self.offset_mod = -8
+            # The old content-based heuristic mistook an empty kdbh for a
+            # four-byte KTB extension.  KTB flags are authoritative and the
+            # same extension rule applies to table, cluster, and index blocks.
+            self.offset_mod = self._ktb_payload_offset() - end_of_ktbbh - 8
 
         if block_type == 6 and block_subtype == 1:
             self.get_row_details()
@@ -929,10 +1015,12 @@ class Rico(object):
             print(" sb2 kdbr[" + str(self.current_block_desc["DECLARED_ROWS"]) + "]\t\t\t\t\t@"
                   + str(self.current_block_desc["FIRST_KDBR"]))
             free_space_start = self.current_block_desc["FIRST_KDBR"] + self.current_block_desc["DECLARED_ROWS"] * 2
-            free_space_size = self.min_rowdata - free_space_start
+            rowdata_start = self.min_rowdata if self.min_rowdata >= 0 else self.block_size - 4
+            rowdata_end = self.max_rowdata if self.max_rowdata >= 0 else rowdata_start
+            free_space_size = max(0, rowdata_start - free_space_start)
             print("\n ub1 freespace[" + str(free_space_size) + "]\t\t\t\t@" + str(free_space_start))
-            rowdata_size = self.max_rowdata - self.min_rowdata
-            print("\n ub1 rowdata[" + str(rowdata_size) + "]\t\t\t\t@" + str(self.min_rowdata))
+            rowdata_size = max(0, rowdata_end - rowdata_start)
+            print("\n ub1 rowdata[" + str(rowdata_size) + "]\t\t\t\t@" + str(rowdata_start))
 
         elif block_type == 6 and block_subtype == 2 and self.index_header:
             header = self.index_header
@@ -1028,6 +1116,13 @@ class Rico(object):
         for number, column in enumerate(entry.get("COL_DATA", [])):
             print("col{0:>5s}[{1:6s} @{2}: {3}".format(
                 str(number), str(column[0]) + "]", column[1], column[2]))
+        if entry.get("IOT_ROW"):
+            iot_row = entry["IOT_ROW"]
+            print("iot row flag={0} lock={1} ncols={2}".format(
+                hex(iot_row["FLAG"]), hex(iot_row["LOCK"]), iot_row["NCOLS"]))
+            for number, column in enumerate(iot_row.get("COL_DATA", [])):
+                print("iotcol{0:>2s}[{1:6s} @{2}: {3}".format(
+                    str(number), str(column[0]) + "]", column[1], column[2]))
         print("")
 
     def p_index_entry(self, slot):
@@ -1341,7 +1436,13 @@ class Rico(object):
         header_dba = self.uint.unpack(self.block_data[4:8])[0]
         expected_dba = self.current_block_desc["DBA"]
         if header_dba not in (0, expected_dba):
-            problems.append("header DBA is {0}, expected {1}".format(hex(header_dba), hex(expected_dba)))
+            # PDB blocks store the relative file number in kcbh.rdba, while
+            # listfiles normally use the absolute CDB file number.
+            header_block = header_dba & (self.max_block - 1)
+            expected_block = expected_dba & (self.max_block - 1)
+            if header_block != expected_block:
+                problems.append("header DBA is {0}, expected block {1}".format(
+                    hex(header_dba), expected_block))
         current_sum, required_sum = self.checksum(False)
         if current_sum != required_sum and self.block_data[15] & 4:
             problems.append("checksum is {0}, required {1}".format(hex(current_sum), hex(required_sum)))
