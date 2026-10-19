@@ -1,0 +1,13 @@
+{
+  "rows_compared_before_after_rollback": 107,
+  "all_columns_match_original_block_images": true,
+  "rowids_unchanged": true,
+  "charset": "AL32UTF8",
+  "debug_session_removed": true,
+  "native_updates": [
+    "shrink 6 -> 4",
+    "grow 4 -> 20",
+    "set NULL"
+  ],
+  "live_rico_datafile_writes": false
+}

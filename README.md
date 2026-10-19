@@ -34,6 +34,7 @@ RICO2 supports:
 - filtering blocks by `DATA_OBJECT_ID` and transaction ID;
 - calculating, applying, and verifying Oracle block checksums;
 - changing an in-memory block buffer, undoing the change, and saving it to disk;
+- resizing a heap or cluster-member column with `SET *kdbr[row].colN = "text"`, including row-directory offsets, free-space counters, and checksum;
 - copying a complete block to another file and block location.
 
 Important limitations:
@@ -41,7 +42,7 @@ Important limitations:
 - RICO2 is not a complete BBED replacement and does not implement a BBED-style BIFILE journal;
 - `ASSIGN` is an alias for byte-level `MODIFY`, not a typed structure-field assignment command;
 - the index decoder handles common B-tree leaf and branch blocks; the special leaf entry format marked by flag `0x10` is exposed as raw data only;
-- `SELECT` is experimental and depends on the decoded row directory of the current block;
+- `SELECT` searches decoded columns in the current table or cluster block;
 - `WIDTH` and `OBASE` are retained for session compatibility, but most reports use an explicit fixed format;
 - RICO2 does not coordinate data file writes with a running Oracle instance;
 - it does not repair logical database structures, redo, undo, dictionary metadata, or segment allocation metadata automatically.
@@ -439,10 +440,13 @@ Flag `0xac` identifies a cluster key. RICO2 reports the slot range owned by the 
 A cluster member row, commonly marked with flag `0x6c`, additionally contains:
 
 ```text
-cluster table@...: 1
+cluster table (kdbt): 1
+cluster member byte@...: 4
 ```
 
-The value identifies the table number within the cluster.
+The table number comes from the `kdbt` directory whose slot range contains
+this `kdbr` entry. The byte in the member header is shown separately without
+assigning it a table-number meaning.
 
 An unused directory slot is reported as:
 
@@ -649,21 +653,37 @@ Scanning a complete file may take a long time because RICO2 reads its blocks seq
 
 ### SELECT
 
-Performs an experimental equality search in decoded table rows.
+Performs an equality search in decoded table or cluster records.
 
 ```text
-SELECT WHERE col<n>=<type>:<value>
+SELECT [TABLE <n>] [WHERE] col<n>=<type>:<value>
 ```
 
-The supported types match record-mode `EXAMINE`: `c`, `n`, and `t`.
+The supported types match record-mode `EXAMINE`: `c`, `n`, and `t`. `WHERE` is
+optional. On a cluster block, the optional `TABLE n` filters by the table
+number derived from the `kdbt[n]` slot range; `TABLE 0` addresses cluster-key
+records. Without this filter, the search includes keys and member rows. Empty
+slots, malformed rows, and rows without the requested column are skipped.
 
-Example:
+Example for an application-owned cluster (illustrative slot numbers):
 
 ```text
 rico2 > print kdbr
-rico2 > select where col0=c:SCOTT
-Found at *kdbr[7]
+rico2 > select col0=n:110
+Found at *kdbr[7] (cluster key)
+rico2 > select table 1 where col0=c:SALES
+Found at *kdbr[21] (cluster table 1)
 ```
+
+`PRINT KDBT` shows the slot ranges for each cluster table. For example,
+`kdbtoffs=21` and `kdbtnrow=22` mean `kdbr[21]` through `kdbr[42]`.
+Inspect an individual member with `PRINT *KDBR[21]`. A cluster key's `col0`
+is the key value, whereas a member's `col0` is its first physically stored
+column; these do not necessarily name the same SQL column.
+
+For an application-owned cluster, inspect `PRINT KDBT` first. Its slot ranges
+show which `kdbr` entries belong to the key and each member table. Then
+`PRINT *KDBR[n]` shows the physical columns of the chosen member.
 
 No match:
 
@@ -671,7 +691,9 @@ No match:
 Nothing
 ```
 
-`SELECT` is a historical RICO2 extension and is not part of BBED compatibility. It operates only on the decoded row collection of the current block. Use `PRINT *kdbr[n]` and `EXAMINE /r...` for more reliable inspection.
+`SELECT` is a historical RICO2 extension and is not part of BBED compatibility.
+It compares decoded values exactly within the current block. Use
+`PRINT *kdbr[n]` and `EXAMINE /r...` to inspect a match in detail.
 
 ### MODIFY and ASSIGN
 
@@ -706,6 +728,106 @@ If the answer is not `Y`, the buffer is unchanged.
 
 > [!IMPORTANT]
 > `MODIFY` may change the in-memory buffer while the session is still in `BROWSE` mode. Write mode is checked by disk-writing commands. Use `UNDO` to discard the in-memory change, or use `SET MODE EDIT` followed by `SAVE` to persist it.
+
+### SET a heap or cluster-member column, including a different length
+
+For the existing laboratory table `HR.EMPLOYEES2`, block 45699 of file 12
+contains an ordinary heap row whose `col1` is `FIRST_NAME`. Run this on an
+**offline copy** of the datafile, with file 12 in the listfile pointing to that
+copy. The example changes the value to four bytes, verifies the rebuilt block,
+then writes the copy:
+
+```text
+SET DBA 12,45699
+PRINT *kdbr[0]
+SET MODE EDIT
+SET *kdbr[0].col1 = "XXXX"
+PRINT *kdbr[0]
+VERIFY
+SAVE
+```
+
+For a block whose ITL or row-lock bytes have not been cleaned out, the explicit
+override is `SET MODE EDIT FORCE`. It disables **only** the ITL and row-lock
+checks for column `SET`; layout, row boundaries, `kdbt`, free-space accounting,
+checksum and staged parsing are still validated. `SHOW MODE` reports `Edit Force`.
+`SET MODE EDIT` or `SET MODE BROWSE` clears the override. FORCE cannot establish
+whether Oracle has committed the referenced transaction and does not make a
+write to a live datafile transactionally safe.
+
+Row slots and column numbers are **zero-based decimal**, independent of `IBASE`.
+For the standard EMPLOYEES layout, `col1` is `FIRST_NAME`. Spaces around `=` are
+optional. `.col[1]` is also accepted. `SET *kdbr[0]="XXXX"` is allowed only when
+the row piece contains exactly one column; multi-column rows require `.colN`.
+
+Values can be quoted UTF-8 text, explicitly encoded bytes, or NULL:
+
+```text
+SET *kdbr[0].col1 = "A longer name"
+SET *kdbr[0].col1 = X'41424344'
+SET *kdbr[0].col1 = NULL
+```
+
+An empty quoted value also writes NULL. The text `"NULL"` writes four characters.
+Strings use the same shell-style quoting as the other RICO2 commands. Hexadecimal
+input must contain complete byte pairs. This is a physical byte editor: it does
+not look up column types, declared lengths, database character sets, constraints,
+or indexes. For NUMBER, DATE, or non-UTF-8 database strings, supply correctly
+encoded bytes with `X'...'`. Editing an indexed value also requires separate index
+maintenance; the command does not implement SQL transaction semantics.
+
+Before changing the buffer, the command independently validates the data-block
+layout, tail, enabled checksum, ITLs, row-slot free list, row boundaries and free-space
+accounting. Column lengths 0–250 use a one-byte length; lengths 251 and above use
+`FE` followed by a little-endian two-byte length; NULL uses `FF`.
+
+For a different encoded length, RICO2 packs the row pieces against the existing
+block tail, retains their physical order and slot numbers, rewrites every moved
+`kdbr` offset, and updates `kdbhfseo`, `kdbhavsp`, and `kdbhtosp`. Fragmented free
+space is consolidated. `kdbhfsbo`, the `kdbt` table directories, free-slot links, row headers,
+ITLs, SCN and tail remain unchanged. Column offsets are decoded again from the
+new image. Equal-length changes leave row positions and fragmentation unchanged.
+Both paths update the checksum. The candidate is validated and parsed before it
+replaces the current buffer; failure leaves the entire session unchanged.
+
+Supported writes are deliberately bounded to ordinary little-endian, uncompressed
+heap `0x2c` rows and cluster member `0x6c` rows. In normal edit mode, ITLs must
+be clean; `EDIT FORCE` is an explicit override of that requirement. Cluster blocks
+must have contiguous `kdbt` slot ranges and complete `0xac` key rows in table 0.
+The other tables may also contain `0x4c` non-head pieces and `0x7c` deleted
+pieces; these are decoded and preserved byte-for-byte but cannot be edit targets.
+Only complete `0x6c` member rows can be changed. RICO2 preserves key rows,
+unrelated member bytes, `kdbt` ranges and logical ROWIDs.
+Empty slots linked through `kdbhfrre` and committed ITL references are supported.
+Normal edit mode rejects active or unresolved transactions. Both modes reject
+unsupported chained/migrated row formats, compression, row dependencies,
+extended column counts and manual offset overrides. A column omitted as a trailing NULL is not materialized;
+the column must already exist in the physical row piece. If the rebuilt row cannot
+fit in the block, the command fails without attempting row migration.
+
+For an application-owned cluster, first use `PRINT KDBT` and `PRINT *KDBR[n]`
+to identify a complete member row and its physical column number. For example,
+if slot 8 belongs to member table 1 and `col1` is a text value, the edit is:
+
+```text
+PRINT KDBT
+PRINT *kdbr[8]
+SET MODE EDIT
+SET *kdbr[8].col1 = "XXXX"
+VERIFY
+SAVE
+```
+
+The cluster slot and column above are illustrative; use the values printed by
+your own block. The writer preserves key rows and the `kdbt` ranges while it
+updates any moved member-row offsets.
+
+This command requires `EDIT` mode and changes only the in-memory image. `UNDO`
+restores the loaded image; `SAVE` writes it through the existing disk-write path.
+It does not coordinate with an open database, maintain ASSM/FSM segment maps,
+generate redo/undo, or validate schema-level consistency. Use an isolated/offline
+copy for physical editing. The [design and laboratory evidence](research/heap-resize/README.md)
+describe what was verified on Oracle 19.32 AArch64 and what remains outside scope.
 
 ### SUM and CHECKSUM
 
@@ -869,7 +991,14 @@ RICO2 recognizes KTB data blocks of type 6 with the table or cluster subtype. It
 - `kdbr` — two-byte relative row offsets;
 - ordinary heap rows;
 - cluster keys, commonly flagged `0xac`, with slot ranges and ROWIDs;
-- cluster member rows, commonly flagged `0x6c`, with their cluster table number.
+- cluster member rows, commonly flagged `0x6c`, with their cluster table number
+  derived from `kdbt` and the separate raw member-header byte.
+
+The KTB ITL count is the single byte at block offset 36. Offset 37 is printed
+separately as an uninterpreted header byte. For example, bytes `02 1f` mean
+two ITLs, not the little-endian count 7938.
+Older parsers that read both bytes as a count can fail during `SET DBA` with
+`unpack requires a buffer of 2 bytes` before reaching the row directory.
 
 The relationship between the structures is:
 
@@ -1177,7 +1306,7 @@ BBED behavior used by this project was compared with the BBED binary and inspect
 Run the unit test suite with:
 
 ```bash
-python3 -m unittest -v test_rico2.py
+python3 -m unittest -v
 ```
 
 The tests cover:
@@ -1193,6 +1322,11 @@ The tests cover:
 - cluster keys and cluster member rows;
 - modification and in-memory undo behavior;
 - full-block copy safeguards.
+- atomic heap-column resizing, NULL and UTF-8/hex input, 250/251-byte length transitions;
+- fragmented layouts, free-slot chains, variable KTB extensions, and more than 255 row slots;
+- preservation of every other column, repeated edits, rejection paths, and save/reload on copies;
+- three-table cluster member edits with preserved key rows, `kdbt` ranges and free slots;
+- explicit FORCE mode against synthetic unclean ITLs and row locks, with structural checks retained;
 
 Read-only validation against real Oracle data files has covered:
 
@@ -1201,6 +1335,9 @@ Read-only validation against real Oracle data files has covered:
 - cluster index segments.
 
 Automated tests do not perform write operations against real Oracle data files.
+`test_heap_resize.py` also uses two captured blocks from the existing laboratory
+`RICK1.HR.EMPLOYEES2`. Separate Oracle DBVERIFY checks cover the edited copies;
+see [the recorded results](research/heap-resize/dbverify-results.json).
 
 ## License and disclaimer
 

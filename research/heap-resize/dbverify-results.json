@@ -1,0 +1,345 @@
+[
+  {
+    "block": 45699,
+    "case": "baseline",
+    "dbverify": {
+      "examined": 1,
+      "data": 1,
+      "failed_data": 0,
+      "corrupt": 0
+    },
+    "sha256": "0da963ed9b91aefd75a733af5498cd96cafd748f55fde253307389ece1d756a9",
+    "moved_rows": 0,
+    "all_column_values_match": true
+  },
+  {
+    "block": 45699,
+    "case": "shrink",
+    "dbverify": {
+      "examined": 1,
+      "data": 1,
+      "failed_data": 0,
+      "corrupt": 0
+    },
+    "sha256": "9967367003d9b4e06c9561b5c925361b3a8469c2167f8cb398615e7440d6f032",
+    "moved_rows": 97,
+    "all_column_values_match": true
+  },
+  {
+    "block": 45699,
+    "case": "grow",
+    "dbverify": {
+      "examined": 1,
+      "data": 1,
+      "failed_data": 0,
+      "corrupt": 0
+    },
+    "sha256": "8a2b1b012dc68e90a37344e92edcd95ac91e51a6d17990e1d446052646a642f5",
+    "moved_rows": 97,
+    "all_column_values_match": true
+  },
+  {
+    "block": 45699,
+    "case": "middle",
+    "dbverify": {
+      "examined": 1,
+      "data": 1,
+      "failed_data": 0,
+      "corrupt": 0
+    },
+    "sha256": "786af70c09988ebbf3da5ec50d82908362c00eab27aa78d489d01784c5461b1a",
+    "moved_rows": 93,
+    "all_column_values_match": true
+  },
+  {
+    "block": 45699,
+    "case": "last",
+    "dbverify": {
+      "examined": 1,
+      "data": 1,
+      "failed_data": 0,
+      "corrupt": 0
+    },
+    "sha256": "becb0e50431dd3076f7c95a1e53de635f6fcc93b75c6f2dd8775f81711aa9d91",
+    "moved_rows": 88,
+    "all_column_values_match": true
+  },
+  {
+    "block": 45699,
+    "case": "null",
+    "dbverify": {
+      "examined": 1,
+      "data": 1,
+      "failed_data": 0,
+      "corrupt": 0
+    },
+    "sha256": "d30523a14cd415d9585a36afd76749e68dc098a8fc6b6923dab1fb5b67c06e06",
+    "moved_rows": 97,
+    "all_column_values_match": true
+  },
+  {
+    "block": 45699,
+    "case": "len250",
+    "dbverify": {
+      "examined": 1,
+      "data": 1,
+      "failed_data": 0,
+      "corrupt": 0
+    },
+    "sha256": "a4c348bc9fa912eab27c17fa57d727ed564edb462f31e63b3bc9837a9395d2ba",
+    "moved_rows": 97,
+    "all_column_values_match": true
+  },
+  {
+    "block": 45699,
+    "case": "len251",
+    "dbverify": {
+      "examined": 1,
+      "data": 1,
+      "failed_data": 0,
+      "corrupt": 0
+    },
+    "sha256": "0821de16d7380d324e2e0ecda3bd2fd485e97169930dd6af7893b7444eb48d5f",
+    "moved_rows": 97,
+    "all_column_values_match": true
+  },
+  {
+    "block": 45699,
+    "case": "len254",
+    "dbverify": {
+      "examined": 1,
+      "data": 1,
+      "failed_data": 0,
+      "corrupt": 0
+    },
+    "sha256": "a01eed99f96ab2c7b9da3f1e3a2a635532f6cc95277af0257e894f9541a952a7",
+    "moved_rows": 97,
+    "all_column_values_match": true
+  },
+  {
+    "block": 45699,
+    "case": "len255",
+    "dbverify": {
+      "examined": 1,
+      "data": 1,
+      "failed_data": 0,
+      "corrupt": 0
+    },
+    "sha256": "de1b3478eab0a636b01c542be30ef9d9eab1b51b2d6b4deaf96c85147039dec0",
+    "moved_rows": 97,
+    "all_column_values_match": true
+  },
+  {
+    "block": 45699,
+    "case": "len4000",
+    "rejected": "Not enough space in this block: need 3996 extra bytes, available 848; row migration is unsupported",
+    "bytes_unchanged": true
+  },
+  {
+    "block": 45699,
+    "case": "full",
+    "dbverify": {
+      "examined": 1,
+      "data": 1,
+      "failed_data": 0,
+      "corrupt": 0
+    },
+    "sha256": "03259e6931e21adaa26f46bbb6fef7d5315c7a43c272fb4c64f79d677cbf1b84",
+    "moved_rows": 97,
+    "all_column_values_match": true
+  },
+  {
+    "block": 45699,
+    "case": "overflow",
+    "rejected": "Not enough space in this block: need 849 extra bytes, available 848; row migration is unsupported",
+    "bytes_unchanged": true
+  },
+  {
+    "block": 45699,
+    "case": "negative-control",
+    "dbverify": {
+      "examined": 1,
+      "data": 1,
+      "failed_data": 1,
+      "corrupt": 0
+    },
+    "sha256": "c24e8bb8a429e31c01cd54cd255f2f7f19b180622c23bfd19260d56629036bc5",
+    "moved_rows": 0,
+    "all_column_values_match": false
+  },
+  {
+    "block": 45700,
+    "case": "baseline",
+    "dbverify": {
+      "examined": 1,
+      "data": 1,
+      "failed_data": 0,
+      "corrupt": 0
+    },
+    "sha256": "d3435125478da76cc7d82496e90aa02cb3ccf3bf8bfb7e240c26bae95eebade3",
+    "moved_rows": 0,
+    "all_column_values_match": true
+  },
+  {
+    "block": 45700,
+    "case": "shrink",
+    "dbverify": {
+      "examined": 1,
+      "data": 1,
+      "failed_data": 0,
+      "corrupt": 0
+    },
+    "sha256": "4e9ea0f2a4d55a2ec4291c7f19fcd8a2255a1977e9d887db688ef214ed98167e",
+    "moved_rows": 10,
+    "all_column_values_match": true
+  },
+  {
+    "block": 45700,
+    "case": "grow",
+    "dbverify": {
+      "examined": 1,
+      "data": 1,
+      "failed_data": 0,
+      "corrupt": 0
+    },
+    "sha256": "7e561a334155765137bca42e142d962f21715dc0b5d803da62f38b8658ad8104",
+    "moved_rows": 10,
+    "all_column_values_match": true
+  },
+  {
+    "block": 45700,
+    "case": "middle",
+    "dbverify": {
+      "examined": 1,
+      "data": 1,
+      "failed_data": 0,
+      "corrupt": 0
+    },
+    "sha256": "b985c70d2d4b2bb797585cfb6814afa96324b0ca832e7a27df19c6f891d90e39",
+    "moved_rows": 6,
+    "all_column_values_match": true
+  },
+  {
+    "block": 45700,
+    "case": "last",
+    "dbverify": {
+      "examined": 1,
+      "data": 1,
+      "failed_data": 0,
+      "corrupt": 0
+    },
+    "sha256": "b12fc4be3a116321ad55e1792330c642d65f5134c3117904953a1f59e8847b7e",
+    "moved_rows": 1,
+    "all_column_values_match": true
+  },
+  {
+    "block": 45700,
+    "case": "null",
+    "dbverify": {
+      "examined": 1,
+      "data": 1,
+      "failed_data": 0,
+      "corrupt": 0
+    },
+    "sha256": "bc658a177e32850a15793d481ba260c4a9cf1ff547127c3026c6b3775ef8247c",
+    "moved_rows": 10,
+    "all_column_values_match": true
+  },
+  {
+    "block": 45700,
+    "case": "len250",
+    "dbverify": {
+      "examined": 1,
+      "data": 1,
+      "failed_data": 0,
+      "corrupt": 0
+    },
+    "sha256": "65713335fb3a309a2be3330e22c5dcf2d24c6c7d49505c226aab244b7120b335",
+    "moved_rows": 10,
+    "all_column_values_match": true
+  },
+  {
+    "block": 45700,
+    "case": "len251",
+    "dbverify": {
+      "examined": 1,
+      "data": 1,
+      "failed_data": 0,
+      "corrupt": 0
+    },
+    "sha256": "013635f4e796fa4a54dd006f6265b79e20a326d933a1139258866514cd6af031",
+    "moved_rows": 10,
+    "all_column_values_match": true
+  },
+  {
+    "block": 45700,
+    "case": "len254",
+    "dbverify": {
+      "examined": 1,
+      "data": 1,
+      "failed_data": 0,
+      "corrupt": 0
+    },
+    "sha256": "1e4ab4554d16d31ea4ccc11f5530ba120ec19aa1ffc9b097591fb1419c61d335",
+    "moved_rows": 10,
+    "all_column_values_match": true
+  },
+  {
+    "block": 45700,
+    "case": "len255",
+    "dbverify": {
+      "examined": 1,
+      "data": 1,
+      "failed_data": 0,
+      "corrupt": 0
+    },
+    "sha256": "8e272222e3cc2bfb13a125acf10db9eaa664a6931ff9fa6e2775e71e98276b2f",
+    "moved_rows": 10,
+    "all_column_values_match": true
+  },
+  {
+    "block": 45700,
+    "case": "len4000",
+    "dbverify": {
+      "examined": 1,
+      "data": 1,
+      "failed_data": 0,
+      "corrupt": 0
+    },
+    "sha256": "6ef72ff222e902211e1a18d8fe395a6a7e23e5a662f425f9bc0ee3101c3bcb55",
+    "moved_rows": 10,
+    "all_column_values_match": true
+  },
+  {
+    "block": 45700,
+    "case": "full",
+    "dbverify": {
+      "examined": 1,
+      "data": 1,
+      "failed_data": 0,
+      "corrupt": 0
+    },
+    "sha256": "a8c5b417a5facc262b4466f10105016c33e1e3ec0920fdb9605ddf293e243a31",
+    "moved_rows": 10,
+    "all_column_values_match": true
+  },
+  {
+    "block": 45700,
+    "case": "overflow",
+    "rejected": "Not enough space in this block: need 7329 extra bytes, available 7328; row migration is unsupported",
+    "bytes_unchanged": true
+  },
+  {
+    "block": 45700,
+    "case": "negative-control",
+    "dbverify": {
+      "examined": 1,
+      "data": 1,
+      "failed_data": 1,
+      "corrupt": 0
+    },
+    "sha256": "0a3227ea9bfb7d7f2797c492d9313749ebfd58f7dc88c094826f7cd6d8766091",
+    "moved_rows": 0,
+    "all_column_values_match": false
+  }
+]

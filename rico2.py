@@ -18,9 +18,11 @@
 # ------------------------------------------------------------------------------
 
 from struct import Struct
+import hashlib
 import importlib.util
 import math
 import os
+import re
 import shlex
 import sys
 from binascii import hexlify as _hexlify
@@ -45,6 +47,30 @@ def text_to_bytes(data):
     if isinstance(data, bytes):
         return data
     return data.encode("utf-8")
+
+
+def generate_oracle_password_verifiers(password, salt_s=None, salt_t=None):
+    """Build Oracle 11g S: and 12c T: verifiers for a UTF-8 password.
+
+    Explicit salts make the function reproducible for independent test vectors;
+    normal commands generate fresh cryptographically random salts.
+    """
+    if not isinstance(password, str) or not password or any(c in password for c in "\x00\r\n"):
+        raise ValueError("GENPWD requires a non-empty password without NUL or newline")
+    password_bytes = password.encode("utf-8")
+    salt_s = os.urandom(10) if salt_s is None else salt_s
+    salt_t = os.urandom(16) if salt_t is None else salt_t
+    if not isinstance(salt_s, bytes) or len(salt_s) != 10:
+        raise ValueError("S: salt must contain exactly 10 bytes")
+    if not isinstance(salt_t, bytes) or len(salt_t) != 16:
+        raise ValueError("T: salt must contain exactly 16 bytes")
+
+    digest_s = hashlib.sha1(password_bytes + salt_s).digest()
+    speedy_key = hashlib.pbkdf2_hmac(
+        "sha512", password_bytes, salt_t + b"AUTH_PBKDF2_SPEEDY_KEY", 4096, dklen=64)
+    digest_t = hashlib.sha512(speedy_key + salt_t).digest()
+    return "S:{0};T:{1}".format(
+        (digest_s + salt_s).hex().upper(), (digest_t + salt_t).hex().upper())
 
 
 class OracleType(object):
@@ -209,7 +235,7 @@ class Rico(object):
         self.struct_kcbh = Struct("BBBBIIHBBHH")
 
         # First 44 bytes of ktbbh
-        self.struct_ktbbh = Struct("BIIIHBBI")
+        self.struct_ktbbh = Struct("BIIIBBBBI")
 
         # 24 bytes for ITL slot
         self.struct_ktbbhitl = Struct("HHIIHBHHI")
@@ -223,6 +249,7 @@ class Rico(object):
         self.struct_kdxle = Struct("<BBBBIhhhhhhIIBB2x")
 
         self.edit_mode = False
+        self.force_edit = False
         self.current_offset = 0
         self.count = 512
         self.width = 80
@@ -307,7 +334,7 @@ class Rico(object):
             "FILENAME": self.current_block_desc.get("FILE_NAME", "N/A"),
             "LISTFILE": self.listfile or "N/A",
             "BLOCKSIZE": self.block_size,
-            "MODE": "Edit" if self.edit_mode else "Browse",
+            "MODE": "Edit Force" if self.force_edit else "Edit" if self.edit_mode else "Browse",
             "IBASE": self._base_name(self.ibase),
             "OBASE": self._base_name(self.obase),
             "WIDTH": self.width,
@@ -673,7 +700,7 @@ class Rico(object):
         num_of_itls = self.current_block_desc["ITLS"]
 
         delcared_rows_offset = 24 * num_of_itls + self.numOfRowsOffset + self.offset_mod
-        declared_rows = self.ubyte.unpack(self.block_data[delcared_rows_offset:delcared_rows_offset + 1])[0]
+        declared_rows = self.ushort.unpack(self.block_data[delcared_rows_offset:delcared_rows_offset + 2])[0]
         actual_rows = 0
 
         num_of_tables_offset = 24 * num_of_itls + self.kdbhntabOffset + self.offset_mod
@@ -681,6 +708,22 @@ class Rico(object):
         # first row pointer in a block
         row_pointer_offset = self.rowDataOffset + 24 * num_of_itls + 4 * (num_of_tables - 1) + self.offset_mod
         self.current_block_desc["FIRST_KDBR"] = row_pointer_offset
+        if row_pointer_offset + 2 * declared_rows > self.block_size - 4:
+            raise ValueError("Heap row directory exceeds the block")
+        table_by_slot = {}
+        kdbt_offset = row_pointer_offset - 4 * num_of_tables
+        if 0 <= kdbt_offset and kdbt_offset + 4 * num_of_tables <= self.block_size - 4:
+            for table_number in range(num_of_tables):
+                first, count = Struct('<HH').unpack_from(
+                    self.block_data, kdbt_offset + 4 * table_number)
+                if first + count > declared_rows or any(
+                        slot in table_by_slot for slot in range(first, first + count)):
+                    table_by_slot = {}
+                    break
+                table_by_slot.update((slot, table_number) for slot in range(first, first + count))
+        self.current_block_desc["KDBT_VALID"] = len(table_by_slot) == declared_rows
+        if not self.current_block_desc["KDBT_VALID"]:
+            table_by_slot = {}
 
         if declared_rows > 0:
 
@@ -688,7 +731,8 @@ class Rico(object):
                 try:
                     self.kdbr_data.append({})
                     stored_pointer = self.ushort.unpack(self.block_data[row_pointer_offset:row_pointer_offset + 2])[0]
-                    if stored_pointer == 0xffff:
+                    fseo = self.ushort.unpack_from(self.block_data, self._ktb_payload_offset() + 8)[0]
+                    if stored_pointer == 0xffff or stored_pointer < fseo:
                         self.kdbr_data[row]["UNUSED"] = True
                         self.kdbr_data[row]["POINTER"] = -1
                         row_pointer_offset += 2
@@ -700,6 +744,8 @@ class Rico(object):
                     self.kdbr_data[row]["OFFSET"] = row_pointer
                     self.kdbr_data[row]["FLAG"] = row_header[0]
                     self.kdbr_data[row]["LOCK"] = row_header[1]
+                    if row in table_by_slot:
+                        self.kdbr_data[row]["TABLE_NO"] = table_by_slot[row]
 
                     hfl = self.row_header["head_piece"] + self.row_header["first_data"] + self.row_header["last_data"]
                     hfld = self.row_header["head_piece"] + self.row_header["first_data"] + self.row_header["last_data"] + self.row_header["deleted"]
@@ -809,10 +855,10 @@ class Rico(object):
                     elif row_header[0] == cluster_member_flag:
                         ncols = self.ubyte.unpack(self.block_data[row_pos:row_pos + 1])[0]
                         row_pos += 1
-                        table_number = self.ubyte.unpack(self.block_data[row_pos:row_pos + 1])[0]
+                        member_byte = self.ubyte.unpack(self.block_data[row_pos:row_pos + 1])[0]
                         row_pos += 1
                         self.kdbr_data[row]["NCOLS"] = ncols
-                        self.kdbr_data[row]["TABNO"] = table_number
+                        self.kdbr_data[row]["CLUSTER_MEMBER_BYTE"] = member_byte
                         self.kdbr_data[row]["CLUSTER_MEMBER"] = True
                         self.kdbr_data[row]["COL_DATA"], row_pos = self._parse_columns(row_pos, ncols)
 
@@ -998,8 +1044,12 @@ class Rico(object):
         self.current_block_desc["BLOCK_SUBTYPE"] = block_subtype
 
         if block_type == 6:
-            self.current_block_desc["ITLS"] = \
-                self.ubyte.unpack(self.block_data[self.ktbbhictOffset:self.ktbbhictOffset + 1])[0]
+            # The ITL count occupies byte 36. Byte 37 can be nonzero and is
+            # not part of it.
+            itls = self.block_data[self.ktbbhictOffset]
+            if not 1 <= itls <= (self.block_size - 48) // 24:
+                raise ValueError("Invalid ITL count in KTB header: {0}".format(itls))
+            self.current_block_desc["ITLS"] = itls
             end_of_ktbbh = 20 + 24 + self.current_block_desc["ITLS"] * 24
             # The old content-based heuristic mistook an empty kdbh for a
             # four-byte KTB extension.  KTB flags are authoritative and the
@@ -1013,7 +1063,8 @@ class Rico(object):
             num_of_itls = self.current_block_desc["ITLS"]
             for i in range(nrows):
                 row_pointer = self.ushort.unpack(self.block_data[row_pointer_offset:row_pointer_offset + 2])[0]
-                if row_pointer == 0xffff:
+                fseo = self.ushort.unpack_from(self.block_data, self._ktb_payload_offset() + 8)[0]
+                if row_pointer == 0xffff or row_pointer < fseo:
                     self.kdbr.append([row_pointer_offset, -1, None])
                     row_pointer_offset += 2
                     continue
@@ -1272,6 +1323,10 @@ class Rico(object):
             kdbtnrow = self.ushort.unpack(self.block_data[kdbt_offset + i * 4 + 2 : kdbt_offset + i * 4 + 4])[0]
             print("\tsb2 kdbtoffs\t\t\t\t@" + str(kdbt_offset + i * 4) + "\t" + str(kdbtoffs))
             print("\tsb2 kdbtnrow\t\t\t\t@" + str(kdbt_offset + i * 4 + 2) + "\t" + str(kdbtnrow))
+            if kdbtnrow:
+                print("\tkdbr slots:\t\t\t\t" + str(kdbtoffs) + " to " + str(kdbtoffs + kdbtnrow - 1))
+            else:
+                print("\tkdbr slots:\t\t\t\t(empty)")
 
         print(" ")
 
@@ -1323,7 +1378,9 @@ class Rico(object):
         print("cols@" + str(row["OFFSET"] + 2) + ":\t" + str(row["NCOLS"]))
 
         if row.get("CLUSTER_MEMBER"):
-            print("cluster table@" + str(row["OFFSET"] + 3) + ":\t" + str(row["TABNO"]))
+            print("cluster table (kdbt):\t" + str(row.get("TABLE_NO", "unknown")))
+            print("cluster member byte@" + str(row["OFFSET"] + 3) + ":\t" +
+                  str(row["CLUSTER_MEMBER_BYTE"]))
         elif row.get("CLUSTER_KEY"):
             print("cluster key slots:\t" + str(row["FIRST_SLOT"]) + " to " + str(row["LAST_SLOT"]))
             for label, rowid in (("first rowid", row["FIRST_ROWID"]), ("last rowid", row["LAST_ROWID"])):
@@ -1404,22 +1461,32 @@ class Rico(object):
         else:
             raise ValueError("Unsupported PRINT structure: " + name)
 
-    def select(self, col_desc, search_pattern):
-        rowp = 0
-        data_type = search_pattern[0]
-        search_string = search_pattern[2:]
-        col = int(col_desc.split()[1][3:])
-        found_row = -1
-
-        for r in self.kdbr_data:
-            col_data = OracleType(r["COL_DATA"][col][2], data_type)
-            if col_data.value_string == search_string:
-                found_row = rowp
-                print("Found at *kdbr[" + str(found_row) + "]")
-
-            rowp += 1
-
-        if found_row == -1:
+    def select(self, col, data_type, search_string, table_number=None):
+        self.require_block()
+        self._require_table_data_block()
+        if table_number is not None and not self.current_block_desc.get("KDBT_VALID"):
+            raise ValueError("Cannot filter by table: kdbt does not cover the row directory")
+        found = False
+        for rowp, row in enumerate(self.kdbr_data):
+            if row.get("UNUSED") or row.get("PARSE_ERROR"):
+                continue
+            table = row.get("TABLE_NO")
+            if table_number is not None and table != table_number:
+                continue
+            columns = row.get("COL_DATA") or []
+            if col >= len(columns):
+                continue
+            try:
+                value = OracleType(columns[col][2], data_type).value_string
+            except (ValueError, TypeError, IndexError, ArithmeticError):
+                continue
+            if value == search_string:
+                suffix = " (cluster key)" if row.get("CLUSTER_KEY") else (
+                    " (cluster table {0})".format(table) if row.get("CLUSTER_MEMBER") and
+                    table is not None else "")
+                print("Found at *kdbr[{0}]{1}".format(rowp, suffix))
+                found = True
+        if not found:
             print("Nothing")
 
 
@@ -1439,11 +1506,12 @@ class Rico(object):
         print("\tub4 kscnbas\t\t\t@28\t" + str(hex(ktbh_head[2]))
               + "\t\t[raw hex: " + hexlify(self.uint.pack(ktbh_head[2])) + "]")
         print("\tub2 kscnwrp\t\t\t@32\t" + str(hex(ktbh_head[3])))
-        print("  sb2 ktbbhict\t\t\t\t@36\t" + str(hex(ktbh_head[4])))
-        print("  ub1 ktbbhflg\t\t\t\t@38\t" + str(hex(ktbh_head[5])))
-        print("  ub1 ktbbhfsl\t\t\t\t@39\t" + str(hex(ktbh_head[6])))
-        print("  ub4 ktbbhfnx\t\t\t\t@40\t" + str(hex(ktbh_head[7])).ljust(8, ' ')
-              + "\t\t[raw hex: " + hexlify(self.uint.pack(ktbh_head[7])) + "]")
+        print("  ub1 ktbbhict\t\t\t\t@36\t" + str(hex(ktbh_head[4])))
+        print("  ub1 ktbbh byte 37\t\t\t@37\t" + str(hex(ktbh_head[5])))
+        print("  ub1 ktbbhflg\t\t\t\t@38\t" + str(hex(ktbh_head[6])))
+        print("  ub1 ktbbhfsl\t\t\t\t@39\t" + str(hex(ktbh_head[7])))
+        print("  ub4 ktbbhfnx\t\t\t\t@40\t" + str(hex(ktbh_head[8])).ljust(8, ' ')
+              + "\t\t[raw hex: " + hexlify(self.uint.pack(ktbh_head[8])) + "]")
 
         itl_pos = 44
         for i in range(self.current_block_desc["ITLS"]):
@@ -1655,6 +1723,220 @@ class Rico(object):
 
         print("\n<16 bytes per line>\n")
 
+    @staticmethod
+    def _block_checksum(data):
+        """Oracle little-endian XOR checksum, with chkval excluded."""
+        if len(data) % 2:
+            raise ValueError("Block size must be even")
+        value = 0
+        for offset in range(0, len(data), 2):
+            if offset != 16:
+                value ^= data[offset] | data[offset + 1] << 8
+        return value
+
+    def _heap_edit_layout(self, data, ignore_itl=False):
+        """Strict decoding for atomic heap and uncompressed cluster member edits."""
+        if len(data) != self.block_size or len(data) not in (2048, 4096, 8192, 16384, 32768):
+            raise ValueError("Unsupported or truncated block size")
+        if data[0] != 6 or data[20] != 1 or self.manual_offset:
+            raise ValueError("Column SET requires a data block without MANUALOFFSET")
+        if data[-4:] != bytes([data[14], data[0]]) + data[8:10]:
+            raise ValueError("Block tail does not match its header")
+        if data[15] & 4 and Struct('<H').unpack_from(data, 16)[0] != self._block_checksum(data):
+            raise ValueError("Invalid block checksum; validate the input before column SET")
+        itls = data[36]
+        if not 1 <= itls <= 255:
+            raise ValueError("Invalid ITL count")
+        base = 44 + 24 * itls
+        if base + 18 > len(data) - 4:
+            raise ValueError("ITL directory exceeds the block")
+        if data[38] & 0x30:
+            base += 8 + (Struct('<H').unpack_from(data, base + 4)[0] if data[38] & 0x20 else 0)
+        if base + 18 > len(data) - 4:
+            raise ValueError("KTB extension exceeds the block")
+        flag, ntab, nrows, frre, fsbo, fseo, avsp, tosp = Struct('<BBHhHHHH').unpack_from(data, base)
+        clustered = ntab > 1
+        if not 1 <= ntab <= 127 or flag not in (0, 1):
+            raise ValueError("Compressed, row-dependency or special data blocks are unsupported")
+        if not clustered and flag != 0:
+            raise ValueError("Special heap blocks are unsupported")
+        committed_itls = set()
+        for slot in range(itls):
+            pos = 44 + 24 * slot
+            flags = Struct('<H').unpack_from(data, pos + 16)[0]
+            has_xid = any(data[pos:pos + 8])
+            if not ignore_itl and (flags & 0x0fff or (has_xid and not flags & 0x8000)):
+                raise ValueError("Active or unclean ITL; clean out the block in Oracle first")
+            if has_xid and flags & 0x8000:
+                committed_itls.add(slot + 1)
+        directory = base + 14 + 4 * ntab
+        if fsbo != 14 + 4 * ntab + 2 * nrows or not directory + 2 * nrows <= base + fseo <= len(data) - 4:
+            raise ValueError("Invalid data directory/free-space boundaries")
+        table_by_slot = {}
+        next_slot = 0
+        for table in range(ntab):
+            first, count = Struct('<HH').unpack_from(data, base + 14 + 4 * table)
+            if first != next_slot or first + count > nrows:
+                raise ValueError("kdbt does not partition the row directory")
+            table_by_slot.update((slot, table) for slot in range(first, first + count))
+            next_slot += count
+        if next_slot != nrows:
+            raise ValueError("kdbt does not cover the row directory")
+        pointers = [Struct('<h').unpack_from(data, directory + 2 * slot)[0] for slot in range(nrows)]
+        free = set()
+        link = frre
+        while link != -1:
+            if link < 0 or link >= nrows or link in free:
+                raise ValueError("Invalid or cyclic free row-slot chain")
+            free.add(link)
+            link = pointers[link]
+        rows = {}
+        for slot, pointer in enumerate(pointers):
+            if slot in free:
+                continue
+            start = base + pointer
+            if pointer < fseo or start + 3 > len(data) - 4:
+                raise ValueError("Invalid row pointer in kdbr[{0}]".format(slot))
+            row_flag = data[start]
+            table = table_by_slot[slot]
+            if (not clustered and row_flag != 0x2c or
+                    clustered and (row_flag != 0xac if table == 0 else
+                                   row_flag not in (0x4c, 0x6c, 0x7c))):
+                raise ValueError("kdbr[{0}] is deleted, chained, migrated or otherwise unsupported".format(slot))
+            if not ignore_itl and data[start + 1] != 0 and data[start + 1] not in committed_itls:
+                raise ValueError("Unresolved row lock in kdbr[{0}]; clean out the block in Oracle first".format(slot))
+            deleted = row_flag == 0x7c
+            ncols = 0 if deleted else data[start + 2]
+            if ncols >= 254:
+                raise ValueError("Extended column counts are unsupported for column SET")
+            pos = start + (19 if row_flag == 0xac else 10 if row_flag == 0x4c
+                           else 4 if clustered else 3)
+            if pos > len(data) - 4:
+                raise ValueError("Truncated row header")
+            columns = []
+            for col in range(ncols):
+                if pos >= len(data) - 4:
+                    raise ValueError("Truncated column length")
+                field = pos
+                length = data[pos]
+                pos += 1
+                if length == 255:
+                    length = 0
+                elif length == 254:
+                    if pos + 2 > len(data) - 4:
+                        raise ValueError("Truncated extended column length")
+                    length = Struct('<H').unpack_from(data, pos)[0]
+                    pos += 2
+                elif length >= 251:
+                    raise ValueError("Reserved column length marker")
+                pos += length
+                if pos > len(data) - 4:
+                    raise ValueError("Column exceeds the block tail")
+                columns.append((field, pos))
+            rows[slot] = {"start": start, "end": pos, "columns": columns,
+                          "table": table, "flag": row_flag, "deleted": deleted}
+        physical = sorted(rows, key=lambda slot: rows[slot]['start'])
+        previous_end = base + fseo
+        for slot in physical:
+            row = rows[slot]
+            if row['start'] < previous_end:
+                raise ValueError("Overlapping data rows")
+            previous_end = row['end']
+        packable_free = len(data) - 4 - (base + fsbo) - sum(
+            row['end'] - row['start'] for row in rows.values())
+        deleted_headers = sum(row['end'] - row['start'] for row in rows.values()
+                              if row['deleted'])
+        if avsp > tosp or tosp != packable_free + deleted_headers or fseo - fsbo > packable_free:
+            raise ValueError("Data free-space accounting is inconsistent")
+        return {"base": base, "directory": directory, "fsbo": fsbo, "fseo": fseo,
+                "avsp": avsp, "tosp": tosp, "rows": rows, "physical": physical,
+                "clustered": clustered, "packable_free": packable_free}
+
+    @staticmethod
+    def _encode_heap_column(value):
+        if value is None or value == b'':
+            return b'\xff'
+        if not isinstance(value, bytes):
+            raise TypeError("Column value must be bytes or None")
+        if len(value) > 65535:
+            raise ValueError("Column is too long for a heap row piece")
+        prefix = bytes([len(value)]) if len(value) <= 250 else b'\xfe' + Struct('<H').pack(len(value))
+        return prefix + value
+
+    def set_heap_column(self, slot, column, value):
+        """Build, validate and install one resized block image; disk writes use SAVE."""
+        self.require_block()
+        if not self.edit_mode:
+            raise RuntimeError("Column SET requires edit mode. Type: set mode edit")
+        old = self.block_data
+        layout = self._heap_edit_layout(old, ignore_itl=self.force_edit)
+        rows = layout['rows']
+        if slot not in rows:
+            raise ValueError("Row slot is absent or unused")
+        row = rows[slot]
+        if layout['clustered'] and row['table'] == 0:
+            raise ValueError("Cluster-key rows cannot be changed with column SET")
+        if row['flag'] not in (0x2c, 0x6c):
+            raise ValueError("Column SET requires a complete, non-deleted row piece")
+        if column is None:
+            if len(row['columns']) != 1:
+                raise ValueError("Use *kdbr[n].colN for a multi-column row")
+            column = 0
+        if not 0 <= column < len(row['columns']):
+            raise ValueError("Column is absent from this row piece (including omitted trailing NULLs)")
+        start, end = row['columns'][column]
+        field = self._encode_heap_column(value)
+        if old[start:end] == field:
+            print("Column already has this value. Nothing changed.")
+            return
+        replacement = old[row['start']:start] + field + old[end:row['end']]
+        delta = len(replacement) - (row['end'] - row['start'])
+        available = min(layout['avsp'], layout['packable_free'])
+        if delta > available:
+            raise ValueError("Not enough space in this block: need {0} extra bytes, available {1}; row migration is unsupported".format(delta, available))
+        candidate = bytearray(old)
+        new_offsets = {}
+        if delta == 0:
+            candidate[start:end] = field
+        else:
+            # Pack against the fixed tail in physical order, retaining every slot
+            # number (and hence ROWID). Never infer a row length from its neighbour.
+            candidate[layout['base'] + layout['fsbo']:-4] = bytes(
+                len(old) - 4 - layout['base'] - layout['fsbo'])
+            cursor = len(old) - 4
+            for number in reversed(layout['physical']):
+                item = rows[number]
+                payload = replacement if number == slot else old[item['start']:item['end']]
+                cursor -= len(payload)
+                candidate[cursor:cursor + len(payload)] = payload
+                Struct('<H').pack_into(candidate, layout['directory'] + number * 2, cursor - layout['base'])
+                new_offsets[number] = cursor
+            Struct('<HHH').pack_into(candidate, layout['base'] + 8,
+                                     cursor - layout['base'], layout['avsp'] - delta, layout['tosp'] - delta)
+        Struct('<H').pack_into(candidate, 16, self._block_checksum(candidate))
+        candidate = bytes(candidate)
+        checked = self._heap_edit_layout(candidate, ignore_itl=self.force_edit)
+        # Parse in an isolated object, so even a display-decoder failure cannot
+        # leave bytes and cached offsets from two different block images.
+        staged = Rico()
+        staged.block_size = self.block_size
+        staged.block_data = candidate
+        staged.current_block_desc = dict(self.current_block_desc)
+        staged.parse_block()
+        for number, item in checked['rows'].items():
+            if staged.kdbr_data[number].get('PARSE_ERROR'):
+                raise ValueError("Edited block failed row decoder validation")
+        self.block_data = candidate
+        for name in ('current_block_desc', 'kdbr', 'kdbr_data', 'min_rowdata', 'max_rowdata',
+                     'offset_mod', 'index_header', 'index_offsets', 'index_entries', 'index_logical_entries'):
+            setattr(self, name, getattr(staged, name))
+        self.current_rowp = slot
+        self.current_offset = checked['rows'][slot]['columns'][column][0]
+        self.dirty = True
+        moved = sum(offset != rows[number]['start'] for number, offset in new_offsets.items())
+        print("kdbr[{0}].col{1}: row size {2} -> {3}, moved rows {4}, free bytes {5} -> {6}; checksum updated. Use SAVE to write.".format(
+            slot, column, row['end'] - row['start'], len(replacement), moved, layout['avsp'], checked['avsp']))
+
     def modify(self, hex_string, byte_string):
         self.require_block()
         if hex_string != "42bee125":
@@ -1788,8 +2070,10 @@ class Rico(object):
 
 COMMAND_HELP = """BBED-compatible commands:
   SET DBA file,block | SET FILE file | SET BLOCK block | SET OFFSET offset
-  SET COUNT count | SET BLOCKSIZE size | SET MODE BROWSE|EDIT
+  SET COUNT count | SET BLOCKSIZE size | SET MODE BROWSE|EDIT|EDIT FORCE
   SET IBASE DEC|HEX|OCT | SET OBASE DEC|HEX|OCT | SET WIDTH width
+  SET *kdbr[row].colN = "text" | X'hex' | NULL  (zero-based, heap/cluster member)
+  SELECT [TABLE n] [WHERE] colN=c|n|t:value
   SHOW [parameter] | INFO
   DUMP [/V] [DBA file,block] [OFFSET offset] [COUNT count]
   MAP
@@ -1866,6 +2150,29 @@ def _select_location(rico, file_id, block_id):
 
 
 def execute_command(rico, command):
+    assignment = re.fullmatch(
+        r'\s*set\s+\*kdbr\[(\d+)\](?:\.col(?:\[(\d+)\]|(\d+)))?\s*=\s*(.*?)\s*',
+        command, re.IGNORECASE | re.DOTALL)
+    if assignment:
+        slot, bracket_column, named_column, literal = assignment.groups()
+        hex_value = re.fullmatch(r"[xX]'([0-9a-fA-F]*)'", literal)
+        if literal.upper() == 'NULL':
+            value = None
+        elif hex_value:
+            try:
+                value = unhexlify(hex_value.group(1))
+            except ValueError:
+                raise ValueError("Hex column value must contain complete byte pairs")
+        elif len(literal) >= 2 and literal[0] in ('\"', "'") and literal[-1] == literal[0]:
+            parts = shlex.split(literal)
+            if len(parts) != 1:
+                raise ValueError("Column SET requires exactly one quoted value")
+            value = text_to_bytes(parts[0])
+        else:
+            raise ValueError("Column SET value must be quoted text, X'hex' or NULL")
+        column = bracket_column if bracket_column is not None else named_column
+        rico.set_heap_column(int(slot), int(column) if column is not None else None, value)
+        return True
     tokens = shlex.split(command)
     if not tokens:
         return True
@@ -1875,6 +2182,10 @@ def execute_command(rico, command):
         return False
     if verb in ("help", "?"):
         print(COMMAND_HELP)
+    elif verb == "genpwd":
+        if len(tokens) != 2:
+            raise ValueError('Usage: GENPWD password (quote passwords containing spaces)')
+        print(generate_oracle_password_verifiers(tokens[1]))
     elif verb == "show":
         rico.show(tokens[1] if len(tokens) > 1 else None)
     elif verb == "info":
@@ -1902,9 +2213,13 @@ def execute_command(rico, command):
         elif parameter == "manualoffset":
             rico.manual_offset = _parse_number(rico, value)
         elif parameter == "mode":
-            if value.lower() not in ("browse", "edit"):
-                raise ValueError("MODE must be BROWSE or EDIT")
+            if value.lower() not in ("browse", "edit") or len(tokens) > 4 or (
+                    len(tokens) == 4 and (value.lower() != "edit" or tokens[3].lower() != "force")):
+                raise ValueError("MODE must be BROWSE, EDIT or EDIT FORCE")
             rico.edit_mode = value.lower() == "edit"
+            rico.force_edit = len(tokens) == 4
+            if rico.force_edit:
+                print("FORCE mode: ITL and row-lock checks disabled for column SET. Use an offline copy.")
         elif parameter in ("ibase", "obase"):
             base = _parse_number(rico, value)
             if base not in (8, 10, 16):
@@ -1992,10 +2307,16 @@ def execute_command(rico, command):
             rico.find(file_id, block_id, data_object_id, search_string, search_hex, search_xo)
     elif verb == "select":
         if len(tokens) == 1:
-            print("Usage: SELECT col0=c:value")
+            print("Usage: SELECT [TABLE n] [WHERE] colN=c|n|t:value")
         else:
-            where, what = command[len(tokens[0]):].strip().split("=", 1)
-            rico.select(where, what)
+            query = re.fullmatch(
+                r"\s*select\s+(?:table\s+(\d+)\s+)?(?:where\s+)?col(\d+)\s*=\s*([cnt]):(.*?)\s*",
+                command, re.IGNORECASE | re.DOTALL)
+            if not query or not query.group(4):
+                raise ValueError("Usage: SELECT [TABLE n] [WHERE] colN=c|n|t:value")
+            table, col, data_type, value = query.groups()
+            rico.select(int(col), data_type.lower(), value,
+                        int(table) if table is not None else None)
     else:
         raise ValueError("Unknown command: " + tokens[0] + ". Type HELP for a command list.")
     return True

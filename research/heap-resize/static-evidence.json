@@ -1,0 +1,74 @@
+{
+  "source": "ghidra-mcp /oracle; AARCH64:LE:64:v8A",
+  "oracle_version": "19.32.0.0.0",
+  "sha256": "d44f87bd87e324bf4a754e93f9ce1b31fd4f61fe1e477f9ba214e793a547c9a0",
+  "hash_verified_against_live_vrick": true,
+  "functions": [
+    {
+      "function": "kdbasp",
+      "address": "0c2f6330",
+      "decompiler_excerpts": [
+        {
+          "first_line": 1,
+          "last_line": 95,
+          "text": "\nvoid kdbasp(long param_1,ulong param_2)\n\n{\n  void *__src;\n  byte bVar1;\n  byte bVar2;\n  short sVar3;\n  int iVar4;\n  byte *pbVar5;\n  ulong uVar6;\n  long lVar7;\n  byte *pbVar8;\n  long lVar9;\n  \n  lVar9 = 0;\n  lVar7 = (long)(int)(*(byte *)(param_1 + 0x10) - 1) * 0x18 + 0x30;\n  if ((*(byte *)(param_1 + 0x12) & 0x30) != 0) {\n    if ((*(byte *)(param_1 + 0x12) >> 5 & 1) == 0) {\n      lVar9 = 8;\n    }\n    else {\n      lVar9 = (ulong)*(ushort *)(param_1 + lVar7 + 4) + 8;\n    }\n  }\n  lVar9 = lVar9 + lVar7;\n  __src = (void *)(param_1 + lVar9);\n  if ((ulong)(long)((int)*(short *)((long)__src + 8) - (int)*(short *)((long)__src + 6)) < param_2)\n  {\n    lVar7 = tpidr_el0;\n    iVar4 = krta2bz(*(undefined4 *)(lVar7 + 0x5e18));\n    kdbcpss(param_1,0xffffffff,0xffffffff,iVar4 + -0x18);\n  }\n  bVar1 = *(byte *)(param_1 + lVar9);\n  uVar6 = 0xe;\n  bVar2 = bVar1 >> 6;\n  lVar9 = (long)*(char *)((long)__src + 1) * 4;\n  if ((bVar1 >> 6 & 1) == 0) {\nLAB_0c2f63dc:\n    lVar9 = uVar6 + lVar9;\n    if (((bVar2 & 1) != 0) && ((*(byte *)((long)__src + 0x15) & 0xb) == 8)) {\nLAB_0c2f64e8:\n      lVar7 = (long)*(short *)((long)__src + 2) << 3;\n      goto LAB_0c2f63ec;\n    }\n  }\n  else {\n    bVar1 = *(byte *)((long)__src + 0x15);\n    if ((bVar2 & 1) == 0) {\nLAB_0c2f6498:\n      uVar6 = (ulong)*(byte *)((long)__src + 0x14) +\n              ((ulong)(bVar1 >> 4) & 1) * (ulong)*(byte *)((long)__src + 0x14) +\n              (ulong)*(byte *)((long)__src + 0x13) * 2 + 0x17 & 0xfffffffffffffffe;\n      goto LAB_0c2f63dc;\n    }\n    if ((bVar1 & 0x23) == 0x20) {\n      uVar6 = 0x16;\n      goto LAB_0c2f63dc;\n    }\n    if ((bVar1 & 0xb) != 8) goto LAB_0c2f6498;\n    lVar9 = lVar9 + 0x16;\n    if ((bVar2 & 1) != 0) goto LAB_0c2f64e8;\n  }\n  lVar7 = (long)*(short *)((long)__src + 2) << 1;\nLAB_0c2f63ec:\n  pbVar5 = __memmove__GLIBC_2_17_veneer((void *)((long)__src + param_2),__src,lVar7 + lVar9);\n  uVar6 = 0xe;\n  if ((*pbVar5 >> 6 & 1) != 0) {\n    bVar1 = pbVar5[0x15];\n    if (((bVar1 & 0x23) == 0x20) || ((bVar1 & 0xb) == 8)) {\n      uVar6 = 0x16;\n    }\n    else {\n      uVar6 = (ulong)pbVar5[0x14] + ((ulong)(bVar1 >> 4) & 1) * (ulong)pbVar5[0x14] +\n              (ulong)pbVar5[0x13] * 2 + 0x17 & 0xfffffffffffffffe;\n    }\n  }\n  iVar4 = (int)*(short *)(pbVar5 + 2);\n  sVar3 = (short)param_2;\n  if (*(short *)(pbVar5 + 2) != 0) {\n    pbVar8 = pbVar5 + uVar6 + (long)(int)(char)pbVar5[1] * 4;\n    do {\n      if (*(short *)(pbVar5 + 8) <= *(short *)pbVar8) {\n        *(short *)pbVar8 = *(short *)pbVar8 - sVar3;\n      }\n      iVar4 = iVar4 + -1;\n      pbVar8 = pbVar8 + 2;\n    } while (iVar4 != 0);\n  }\n  *(short *)(pbVar5 + 10) = *(short *)(pbVar5 + 10) - sVar3;\n  *(short *)(pbVar5 + 8) = *(short *)(pbVar5 + 8) - sVar3;\n  *(short *)(pbVar5 + 0xc) = *(short *)(pbVar5 + 0xc) - sVar3;\n  return;\n}\n"
+        }
+      ]
+    },
+    {
+      "function": "kdbfsp",
+      "address": "0721e560",
+      "decompiler_excerpts": [
+        {
+          "first_line": 1,
+          "last_line": 81,
+          "text": "\nvoid kdbfsp(long param_1,long param_2)\n\n{\n  void *__src;\n  byte bVar1;\n  byte bVar2;\n  short sVar3;\n  void *pvVar4;\n  long lVar5;\n  int iVar6;\n  long lVar7;\n  short *psVar8;\n  ulong uVar9;\n  \n  lVar5 = (long)(int)(*(byte *)(param_1 + 0x10) - 1) * 0x18 + 0x30;\n  if ((*(byte *)(param_1 + 0x12) & 0x30) == 0) {\n    lVar7 = 0;\n  }\n  else if ((*(byte *)(param_1 + 0x12) >> 5 & 1) == 0) {\n    lVar7 = 8;\n  }\n  else {\n    lVar7 = (ulong)*(ushort *)(param_1 + lVar5 + 4) + 8;\n  }\n  lVar7 = lVar7 + lVar5;\n  pvVar4 = (void *)(param_1 + lVar7);\n  __src = (void *)((long)pvVar4 + param_2);\n  bVar2 = *(byte *)((long)pvVar4 + param_2) >> 6;\n  if ((*(byte *)((long)pvVar4 + param_2) >> 6 & 1) == 0) {\n    uVar9 = 0xe;\n  }\n  else {\n    bVar1 = *(byte *)((long)__src + 0x15);\n    if (((bVar2 & 1) == 0) || (((bVar1 & 0x23) != 0x20 && ((bVar1 & 0xb) != 8)))) {\n      uVar9 = (ulong)*(byte *)((long)__src + 0x14) +\n              ((ulong)(bVar1 >> 4) & 1) * (ulong)*(byte *)((long)__src + 0x14) +\n              (ulong)*(byte *)((long)__src + 0x13) * 2 + 0x17 & 0xfffffffffffffffe;\n    }\n    else {\n      uVar9 = 0x16;\n    }\n  }\n  if (((bVar2 & 1) == 0) || ((*(byte *)((long)__src + 0x15) & 0xb) != 8)) {\n    lVar5 = (long)*(short *)((long)__src + 2) << 1;\n  }\n  else {\n    lVar5 = (long)*(short *)((long)__src + 2) << 3;\n  }\n  pvVar4 = memmove(pvVar4,__src,uVar9 + (long)(int)*(char *)((long)__src + 1) * 4 + lVar5);\n  if ((*(byte *)(param_1 + lVar7) >> 6 & 1) == 0) {\n    uVar9 = 0xe;\n  }\n  else {\n    bVar2 = *(byte *)((long)pvVar4 + 0x15);\n    if (((bVar2 & 0x23) == 0x20) || ((bVar2 & 0xb) == 8)) {\n      uVar9 = 0x16;\n    }\n    else {\n      uVar9 = (ulong)*(byte *)((long)pvVar4 + 0x14) +\n              ((ulong)(bVar2 >> 4) & 1) * (ulong)*(byte *)((long)pvVar4 + 0x14) +\n              (ulong)*(byte *)((long)pvVar4 + 0x13) * 2 + 0x17 & 0xfffffffffffffffe;\n    }\n  }\n  iVar6 = (int)*(short *)((long)pvVar4 + 2);\n  sVar3 = (short)param_2;\n  psVar8 = (short *)((long)pvVar4 + uVar9 + (long)(int)*(char *)((long)pvVar4 + 1) * 4);\n  while( true ) {\n    iVar6 = iVar6 + -1;\n    if (iVar6 == -1) break;\n    if (*(short *)((long)pvVar4 + 8) <= *psVar8) {\n      *psVar8 = sVar3 + *psVar8;\n    }\n    psVar8 = psVar8 + 1;\n  }\n  *(short *)((long)pvVar4 + 8) = sVar3 + *(short *)((long)pvVar4 + 8);\n  *(short *)((long)pvVar4 + 10) = sVar3 + *(short *)((long)pvVar4 + 10);\n  *(short *)((long)pvVar4 + 0xc) = sVar3 + *(short *)((long)pvVar4 + 0xc);\n  return;\n}\n"
+        }
+      ]
+    },
+    {
+      "function": "kdr9igtl",
+      "decompiler_excerpts": [
+        {
+          "first_line": 1,
+          "last_line": 55,
+          "text": "\nint kdr9igtl(byte *param_1,int param_2)\n\n{\n  byte bVar1;\n  int iVar2;\n  byte *pbVar3;\n  uint uVar4;\n  long lVar5;\n  long lVar6;\n  \n  bVar1 = *param_1;\n  if ((bVar1 >> 4 & 1) == 0) {\n    uVar4 = (uint)param_1[2];\n    lVar5 = (long)(char)(&kdrhln)[(int)(uint)bVar1];\n    lVar6 = lVar5;\n    if (((param_2 != 0) && (-1 < (char)bVar1)) && ((bVar1 >> 5 & 1) != 0)) {\n      lVar6 = lVar5 + 6;\n      if ((ushort)(param_1[((ulong)(bVar1 >> 6) & 1) + 3] + 0x8000 +\n                  (ushort)param_1[((ulong)(bVar1 >> 6) & 1) + 4] * 0x100) < 0x7fff) {\n        lVar6 = lVar5 + 8;\n      }\n    }\n    pbVar3 = param_1 + lVar6;\n    if (param_1[2] != 0) {\n      do {\n        while( true ) {\n          bVar1 = *pbVar3;\n          if (bVar1 != 0xff) break;\n          pbVar3 = pbVar3 + 1;\nLAB_0c7bac24:\n          uVar4 = uVar4 - 1;\n          if (uVar4 == 0) goto LAB_0c7bac08;\n        }\n        if (bVar1 == 0xfe) {\n          pbVar3 = pbVar3 + (long)*(short *)(pbVar3 + 1) + 3;\n          goto LAB_0c7bac24;\n        }\n        uVar4 = uVar4 - 1;\n        pbVar3 = pbVar3 + (ulong)bVar1 + 1;\n      } while (uVar4 != 0);\n    }\nLAB_0c7bac08:\n    iVar2 = (int)pbVar3 - (int)param_1;\n  }\n  else {\n    iVar2 = 4;\n    if ((bVar1 & 0x40) == 0) {\n      iVar2 = 2;\n    }\n  }\n  return iVar2;\n}\n\n"
+        }
+      ],
+      "address": "0c7babb0"
+    },
+    {
+      "function": "kdb4cpss",
+      "address": "0c7b89bc",
+      "decompiler_excerpts": [
+        {
+          "first_line": 420,
+          "last_line": 455,
+          "text": "      sVar11 = sVar34 + 0x16;\n      if ((bVar32 & 1) == 0) goto LAB_0c7b9080;\n      goto LAB_0c7b96b8;\n    }\n    sVar11 = sVar34 + ((ushort)pbVar3[0x14] + (bVar7 >> 4 & 1) * (ushort)pbVar3[0x14] +\n                       (pbVar3[0x13] + 0xb) * 2 + 1 & 0xfffe);\nLAB_0c7b9080:\n    sVar34 = *(short *)(pbVar3 + 2) << 1;\n  }\n  *(short *)(pbVar3 + 6) = sVar34 + sVar11;\n  iVar26 = (int)pbVar5 - (int)pbStack_88;\n  sVar11 = (short)iVar13 - (short)iVar26;\n  iVar26 = iVar26 - iStack_28;\n  *(short *)(pbVar3 + 8) = sVar11;\n  if (iVar26 != 0) {\n    __memcpy__GLIBC_2_17_veneer(pbVar3 + sVar11,pbStack_88,(long)iVar26);\n  }\n  *(short *)(pbVar3 + 10) = (short)iStack_54 + *(short *)(pbVar3 + 10);\n  *(short *)(pbVar3 + 0xc) = (short)iStack_54 + *(short *)(pbVar3 + 0xc);\n  bVar32 = *(byte *)((long)param_1 + lVar28);\n  if ((bVar32 >> 4 & 1) != 0) {\n    if (pbVar3[1] != 1) {\n      if ((bVar32 >> 6 & 1) == 0) {\n        sVar11 = *(short *)(pbVar3 + 0x14);\n        uVar36 = 0xe;\n      }\n      else {\n        bVar7 = pbVar3[0x15];\n        if (((bVar7 & 0x23) == 0x20) || ((bVar7 & 0xb) == 8)) {\n          sVar11 = *(short *)(pbVar3 + 0x1c);\n          uVar36 = 0x16;\n        }\n        else {\n          uVar36 = (ulong)pbVar3[0x14] + ((ulong)(bVar7 >> 4) & 1) * (ulong)pbVar3[0x14] +\n                   (ulong)pbVar3[0x13] * 2 + 0x17 & 0xfffffffffffffffe;\n          sVar11 = *(short *)(pbVar3 + uVar36 + 6);"
+        },
+        {
+          "first_line": 514,
+          "last_line": 577,
+          "text": "        else {\n          pbVar2 = pbVar3 + *(short *)pbVar18;\n          if (bVar32 == 0) {\n            bVar7 = *pbVar3;\n            if ((bVar7 >> 6 & 1) != 0) {\n              if (((pbVar3[0x15] >> 6 & 1) == 0) &&\n                 (((bVar7 >> 6 & 1) == 0 || ((pbVar3[0x15] & 0x23) != 0x20)))) {\n                iVar12 = kdr9ir2gtl(pbVar3,pbVar2,bVar7 >> 5 & 1);\n                goto joined_r0x0c7b8f68;\n              }\n              iVar12 = kdr9igtl(pbVar2,bVar7 >> 5 & 1);\n              if (iVar19 == 0) goto LAB_0c7b8f78;\n              goto LAB_0c7b8f6c;\n            }\n            iVar12 = kdr9igtl(pbVar2,bVar7 >> 5 & 1);\n            if (iVar19 == 0) goto LAB_0c7b8f78;\n            if (pbVar14 == pbVar2 + iVar12) {\n              iVar26 = iVar26 - iVar12;\n              *(short *)pbVar31 = (short)iVar26;\n              pbVar14 = pbVar2;\n              iVar33 = iVar19 + iVar12;\n              goto joined_r0x0c7b8fa4;\n            }\nLAB_0c7b8f00:\n            sVar25 = (size_t)iVar19;\n            __dest = pbStack_88 + -sVar25;\n            bVar10 = pbVar5 != pbStack_88;\n            pbStack_88 = __dest;\n            iVar33 = iVar12;\n            if (bVar10 || pbVar1 != pbVar14 + sVar25) {\n              iVar26 = iVar26 - iVar12;\n              __memcpy__GLIBC_2_17_veneer(__dest,pbVar14,sVar25);\n              *(short *)pbVar31 = (short)iVar26;\n              pbVar14 = pbVar2;\n              goto joined_r0x0c7b8fa4;\n            }\n          }\n          else {\n            iVar12 = kdr9ir2gtsl(pbVar3,iVar35);\njoined_r0x0c7b8f68:\n            if (iVar19 != 0) {\nLAB_0c7b8f6c:\n              if (pbVar14 != pbVar2 + iVar12) goto LAB_0c7b8f00;\n            }\nLAB_0c7b8f78:\n            iVar33 = iVar19 + iVar12;\n            iVar19 = iStack_28;\n          }\n          iVar26 = iVar26 - iVar12;\n          *(short *)pbVar31 = (short)iVar26;\n          pbVar14 = pbVar2;\n          iStack_28 = iVar19;\n        }\njoined_r0x0c7b8fa4:\n        iVar19 = iVar33;\n        if (pbVar18 + 2 == pbVar15) goto LAB_0c7b8fb4;\n        iVar35 = iVar35 + 1;\n        pbVar18 = pbVar18 + 2;\n        pbVar31 = pbVar31 + 2;\n      } while( true );\n    }\n    goto LAB_0c7b8fbc;\n  }\n  goto LAB_0c7b8fcc;"
+        }
+      ]
+    },
+    {
+      "function": "kduovw",
+      "address": "0c2d39b0",
+      "decompiler_excerpts": [
+        {
+          "first_line": 2014,
+          "last_line": 2053,
+          "text": "              lVar40 = 0;\n              puVar19 = puVar33;\n              do {\n                iVar26 = (uint)*(ushort *)(param_1[9] + lVar40 * 2) +\n                         (uint)*(ushort *)((long)param_1 + 0x42);\n                sVar46 = *(short *)(param_1[0x4c] + (long)iVar26 * 2);\n                bVar6 = *(byte *)(param_1[0x50] + (long)iVar26);\n                if (sVar46 < 0xfb) {\n                  puVar12 = puVar19 + 1;\n                  if (sVar46 == 0 && (bVar6 & 4) != 0) {\n                    *puVar19 = 0xff;\n                  }\n                  else {\n                    *puVar19 = (char)sVar46;\n                    if ((bVar6 & 4) == 0) {\n                      lVar31 = 1;\n                      goto LAB_0c2d6430;\n                    }\n                  }\nLAB_0c2d7514:\n                  lVar34 = lVar34 + 1;\n                }\n                else {\n                  *puVar19 = 0xfe;\n                  puVar12 = puVar19 + 3;\n                  puVar19[1] = (char)sVar46;\n                  puVar19[2] = (char)((ushort)sVar46 >> 8);\n                  lVar31 = 3;\n                  if ((bVar6 & 4) != 0) goto LAB_0c2d7514;\nLAB_0c2d6430:\n                  sVar49 = (size_t)sVar46;\n                  lVar34 = lVar34 + lVar31 + sVar49;\n                  pvVar51 = __memcpy__GLIBC_2_17_veneer\n                                      (puVar12,*(void **)(param_1[0x4b] + (long)iVar26 * 8),sVar49);\n                  puVar12 = (undefined1 *)((long)pvVar51 + sVar49);\n                }\n                lVar40 = lVar40 + 1;\n                puVar19 = puVar12;\n              } while ((int)lVar40 < (int)(uint)*(ushort *)((long)param_1 + 0x44));\n            }"
+        }
+      ]
+    }
+  ],
+  "runtime_breakpoint": {
+    "function": "kduovw",
+    "session": "323049e76978",
+    "spid": 6020,
+    "outcome": "Trigger timed out after 30s; no breakpoint hit is claimed. Session closed and SPID absence verified."
+  }
+}

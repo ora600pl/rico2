@@ -1,0 +1,121 @@
+	DBA		0x300b283 (50377347 12,45699 @ 0)
+	DBA		0x300b283 (50377347 12,45699 @ 0)
+kdbr[0].col1: row size 62 -> 60, moved rows 97, free bytes 848 -> 850; checksum updated. Use SAVE to write.
+checksum int = 49790
+checksum hex = 0xc27e
+Verification passed for File 12, Block 45699 @ 0
+
+
+DBVERIFY: Release 19.0.0.0.0 - Production on Fri Oct 16 14:45:34 2026
+
+Copyright (c) 1982, 2023, Oracle and/or its affiliates.  All rights reserved.
+
+DBVERIFY - Verification starting : FILE = /tmp/rico2-resize-20261016/45699-shrink.dbf
+
+
+DBVERIFY - Verification complete
+
+Total Pages Examined         : 1
+Total Pages Processed (Data) : 1
+Total Pages Failing   (Data) : 0
+Total Pages Processed (Index): 0
+Total Pages Failing   (Index): 0
+Total Pages Processed (Other): 0
+Total Pages Processed (Seg)  : 0
+Total Pages Failing   (Seg)  : 0
+Total Pages Empty            : 0
+Total Pages Marked Corrupt   : 0
+Total Pages Influx           : 0
+Total Pages Encrypted        : 0
+Highest block SCN            : 6027203 (0.6027203)
+	DBA		0x300b283 (50377347 12,45699 @ 0)
+	DBA		0x300b283 (50377347 12,45699 @ 0)
+kdbr[0].col1: row size 62 -> 910, moved rows 97, free bytes 848 -> 0; checksum updated. Use SAVE to write.
+checksum int = 35247
+checksum hex = 0x89af
+Verification passed for File 12, Block 45699 @ 0
+
+
+DBVERIFY: Release 19.0.0.0.0 - Production on Fri Oct 16 14:45:35 2026
+
+Copyright (c) 1982, 2023, Oracle and/or its affiliates.  All rights reserved.
+
+DBVERIFY - Verification starting : FILE = /tmp/rico2-resize-20261016/45699-full.dbf
+
+
+DBVERIFY - Verification complete
+
+Total Pages Examined         : 1
+Total Pages Processed (Data) : 1
+Total Pages Failing   (Data) : 0
+Total Pages Processed (Index): 0
+Total Pages Failing   (Index): 0
+Total Pages Processed (Other): 0
+Total Pages Processed (Seg)  : 0
+Total Pages Failing   (Seg)  : 0
+Total Pages Empty            : 0
+Total Pages Marked Corrupt   : 0
+Total Pages Influx           : 0
+Total Pages Encrypted        : 0
+Highest block SCN            : 6027203 (0.6027203)
+	DBA		0x300b283 (50377347 12,45699 @ 0)
+
+
+DBVERIFY: Release 19.0.0.0.0 - Production on Fri Oct 16 14:45:35 2026
+
+Copyright (c) 1982, 2023, Oracle and/or its affiliates.  All rights reserved.
+
+DBVERIFY - Verification starting : FILE = /tmp/rico2-resize-20261016/45699-negative-control.dbf
+Block Checking: DBA = 50377347, Block Type = KTB-managed data block
+data header at 0xffff8266a07c
+kdbchk: row does not end within block
+        table=0  slot=0
+        len=216  offset=8002  dtl=8064 aclen=216
+Page 45699 failed with check code 6103
+
+
+DBVERIFY - Verification complete
+
+Total Pages Examined         : 1
+Total Pages Processed (Data) : 1
+Total Pages Failing   (Data) : 1
+Total Pages Processed (Index): 0
+Total Pages Failing   (Index): 0
+Total Pages Processed (Other): 0
+Total Pages Processed (Seg)  : 0
+Total Pages Failing   (Seg)  : 0
+Total Pages Empty            : 0
+Total Pages Marked Corrupt   : 0
+Total Pages Influx           : 0
+Total Pages Encrypted        : 0
+Highest block SCN            : 6027203 (0.6027203)
+	DBA		0x300b284 (50377348 12,45700 @ 0)
+	DBA		0x300b284 (50377348 12,45700 @ 0)
+kdbr[0].col1: row size 70 -> 4067, moved rows 10, free bytes 7328 -> 3331; checksum updated. Use SAVE to write.
+checksum int = 5972
+checksum hex = 0x1754
+Verification passed for File 12, Block 45700 @ 0
+
+
+DBVERIFY: Release 19.0.0.0.0 - Production on Fri Oct 16 14:45:36 2026
+
+Copyright (c) 1982, 2023, Oracle and/or its affiliates.  All rights reserved.
+
+DBVERIFY - Verification starting : FILE = /tmp/rico2-resize-20261016/45700-len4000.dbf
+
+
+DBVERIFY - Verification complete
+
+Total Pages Examined         : 1
+Total Pages Processed (Data) : 1
+Total Pages Failing   (Data) : 0
+Total Pages Processed (Index): 0
+Total Pages Failing   (Index): 0
+Total Pages Processed (Other): 0
+Total Pages Processed (Seg)  : 0
+Total Pages Failing   (Seg)  : 0
+Total Pages Empty            : 0
+Total Pages Marked Corrupt   : 0
+Total Pages Influx           : 0
+Total Pages Encrypted        : 0
+Highest block SCN            : 6226991 (0.6226991)

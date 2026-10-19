@@ -103,6 +103,10 @@ class RicoCommandTests(unittest.TestCase):
 
         _, output = self.run_command("examine /r")
         self.assertIn("174 [NUMBER?]", output)
+        _, output = self.run_command("select where col0=n:174")
+        self.assertEqual("Found at *kdbr[0]\n", output)
+        _, output = self.run_command("select col1=c:Ellen")
+        self.assertEqual("Found at *kdbr[0]\n", output)
 
     def test_modify_and_undo_are_in_memory(self):
         self.run_command("set offset 32")
@@ -373,8 +377,9 @@ class RicoCommandTests(unittest.TestCase):
         block[20] = 1
         block[36] = 2
         block[92:106] = struct.pack("Bbhhhhhh", 0, 2, 3, -1, 20, 80, 80, 80)
-        block[114:120] = struct.pack("HHH", 108, 138, 0xffff)
-        block[200:209] = b"\x6c\x00\x02\x01\x01A\x02BC"
+        block[106:114] = struct.pack("<HHHH", 0, 1, 1, 2)
+        block[114:120] = struct.pack("HHH", 138, 108, 0xffff)
+        block[200:209] = b"\x6c\x00\x02\x09\x01A\x02BC"
         first_rowid = (4194305).to_bytes(4, "big") + (7).to_bytes(2, "big")
         last_rowid = (4194305).to_bytes(4, "big") + (8).to_bytes(2, "big")
         block[230:251] = (b"\xac\x00\x01" + struct.pack("HH", 5, 6) +
@@ -382,18 +387,93 @@ class RicoCommandTests(unittest.TestCase):
         self.load_synthetic_block(block)
 
         self.assertTrue(self.rico.current_block_desc["IS_CLUSTER"])
-        member = self.rico.kdbr_data[0]
-        key = self.rico.kdbr_data[1]
-        self.assertEqual(1, member["TABNO"])
+        member = self.rico.kdbr_data[1]
+        key = self.rico.kdbr_data[0]
+        self.assertEqual(1, member["TABLE_NO"])
+        self.assertEqual(9, member["CLUSTER_MEMBER_BYTE"])
         self.assertEqual(["41", "4243"], [column[2] for column in member["COL_DATA"]])
         self.assertEqual(5, key["FIRST_SLOT"])
         self.assertEqual(8, key["LAST_ROWID"]["SLOT"])
         self.assertEqual("4b", key["COL_DATA"][0][2])
         self.assertTrue(self.rico.kdbr_data[2]["UNUSED"])
-        _, output = self.run_command("print *kdbr[1]")
+        _, output = self.run_command("print *kdbr[0]")
         self.assertIn("cluster key slots", output)
         _, output = self.run_command("verify")
         self.assertIn("Verification passed", output)
+
+    def test_select_handles_cluster_directories_and_sparse_rows(self):
+        block = bytearray(self.block_size)
+        block[0] = 6
+        block[4:8] = struct.pack("I", 4194305)
+        block[20] = 1
+        block[36] = 2
+        block[37] = 0x1f  # Upper byte is not part of the ITL count.
+        block[92:106] = struct.pack("Bbhhhhhh", 0, 3, 45, -1, 108, 7600, 0, 0)
+        block[106:118] = struct.pack("<HHHHHH", 0, 21, 21, 22, 43, 2)
+        for slot, offset in ((0, 8000), (21, 7900), (43, 7800)):
+            struct.pack_into("<H", block, 118 + slot * 2, offset - 92)
+        rowid = (4194305).to_bytes(4, "big") + (0).to_bytes(2, "big")
+        block[8000:8023] = (b"\xac\x00\x01" + struct.pack("<HH", 1, 1) +
+                            rowid + rowid + b"\x03\xc2\x02\x0b")
+        block[7900:7912] = b"\x6c\x00\x02\x04\x05ALICE\x01\x80"
+        block[7800:7808] = b"\x6c\x00\x01\x07\x03\xc2\x02\x0b"
+        self.load_synthetic_block(block)
+
+        self.assertEqual(2, self.rico.current_block_desc["ITLS"])
+        _, header = self.run_command("print ktbbh")
+        self.assertIn("ub1 ktbbhict", header)
+        self.assertIn("@37\t0x1f", header)
+
+        _, directories = self.run_command("print kdbt")
+        for span in ("0 to 20", "21 to 42", "43 to 44"):
+            self.assertIn(span, directories)
+        _, result = self.run_command("select col0=n:110")
+        self.assertIn("Found at *kdbr[0] (cluster key)", result)
+        self.assertIn("Found at *kdbr[43] (cluster table 2)", result)
+        _, result = self.run_command("select table 1 where col0=c:ALICE")
+        self.assertEqual("Found at *kdbr[21] (cluster table 1)\n", result)
+        _, result = self.run_command("select where col2=c:ALICE")
+        self.assertEqual("Nothing\n", result)
+        _, result = self.run_command("print *kdbr[21]")
+        self.assertIn("cluster table (kdbt):\t1", result)
+        self.assertIn("cluster member byte@7903:\t4", result)
+        self.assertIn("ALICE", result)
+
+        for command in ("select no", "select col0=x:110", "select table one col0=n:110"):
+            with self.subTest(command=command), self.assertRaisesRegex(ValueError, "Usage: SELECT"):
+                self.run_command(command)
+
+    def test_cluster_rowid_key_and_hr_member_use_different_slots(self):
+        block = bytearray(self.block_size)
+        block[0] = 6
+        block[4:8] = struct.pack("<I", 4194304 + 215)
+        block[20] = 1
+        block[36:38] = b"\x02\x1f"
+        block[92:106] = struct.pack("<BBHhHHHH", 1, 3, 31, -1, 88, 5800, 0, 0)
+        block[106:118] = struct.pack("<HHHHHH", 0, 13, 13, 14, 27, 4)
+        for slot, offset in ((6, 8021), (19, 6918), (27, 6000)):
+            struct.pack_into("<H", block, 118 + 2 * slot, offset - 92)
+        key_rowid = (4194304 + 215).to_bytes(4, "big") + (6).to_bytes(2, "big")
+        block[8021:8044] = (b"\xac\x00\x01" + struct.pack("<HH", 1, 1) +
+                            key_rowid + key_rowid + b"\x03\xc2\x02\x23")
+        block[6918:6925] = b"\x6c\x00\x01\x04\x02HR"
+        block[6000:6006] = b"\x6c\x00\x01\x00\x01X"
+        self.load_synthetic_block(block)
+
+        self.assertEqual(2, self.rico.current_block_desc["ITLS"])
+        self.assertTrue(self.rico.current_block_desc["KDBT_VALID"])
+        self.assertEqual(1, self.rico.kdbr_data[19]["TABLE_NO"])
+        self.assertEqual(4, self.rico.kdbr_data[19]["CLUSTER_MEMBER_BYTE"])
+        self.assertEqual(6, self.rico.kdbr_data[6]["FIRST_ROWID"]["SLOT"])
+        _, result = self.run_command("select table 1 col0=c:HR")
+        self.assertEqual("Found at *kdbr[19] (cluster table 1)\n", result)
+        _, result = self.run_command("select table 2 col0=c:HR")
+        self.assertEqual("Nothing\n", result)
+        _, result = self.run_command("select col0=n:134")
+        self.assertEqual("Found at *kdbr[6] (cluster key)\n", result)
+        _, result = self.run_command("print *kdbr[19]")
+        self.assertIn("cluster table (kdbt):\t1", result)
+        self.assertIn("col    0[2]", result)
 
     def test_empty_cluster_block_uses_ktb_flags_for_kdbh_offset(self):
         block = bytearray(self.block_size)
